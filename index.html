@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b0e12">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="镜头古琴">
 <title>镜头古琴 · 赛博演奏原型</title>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0e12; overflow: hidden;
@@ -387,14 +394,21 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function initHands() {
-  const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
-  const fileset = await vision.FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  // 模型与 wasm 已本地化(vendor/,离线与上架前提);本地缺失时退回 CDN
+  let vision, wasmRoot, modelPath;
+  try {
+    vision = await import('./vendor/mediapipe/vision_bundle.mjs');
+    wasmRoot = './vendor/mediapipe/wasm';
+    modelPath = './vendor/mediapipe/hand_landmarker.task';
+  } catch (e) {
+    console.warn('[model] 本地模型加载失败,退回 CDN', e);
+    vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+    wasmRoot = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+    modelPath = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+  }
+  const fileset = await vision.FilesetResolver.forVisionTasks(wasmRoot);
   landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-      delegate: 'GPU',
-    },
+    baseOptions: { modelAssetPath: modelPath, delegate: 'GPU' },
     runningMode: 'VIDEO', numHands: 2,
   });
   modelOn = true;
@@ -1416,6 +1430,10 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   document.getElementById('tips').style.display = 'block';
   requestAnimationFrame(loop);
 });
+
+// PWA:注册 Service Worker(预缓存应用壳与模型,离线可用;失败静默)
+if ('serviceWorker' in navigator)
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
 </script>
 </body>
 </html>
