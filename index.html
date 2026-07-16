@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>镜头古琴 · 赛博演奏原型</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0b0e12; overflow: hidden;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif; color: #e8dcc0; }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  video { display: none; }
+  #overlay { position: fixed; inset: 0; background: rgba(8,10,14,.92); display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 10;
+    text-align: center; padding: 24px; }
+  #overlay h1 { font-size: 34px; letter-spacing: 8px; margin: 0; color: #d8c9a3; font-weight: 500; }
+  #overlay p { max-width: 600px; line-height: 1.9; color: #b8ac8e; font-size: 15px; margin: 0; }
+  #startBtn { font-family: inherit; font-size: 20px; letter-spacing: 6px; padding: 14px 46px;
+    background: transparent; color: #d8c9a3; border: 1px solid #8a7a55; border-radius: 4px;
+    cursor: pointer; transition: all .25s; }
+  #startBtn:hover { background: #8a7a5522; box-shadow: 0 0 24px #8a7a5544; }
+  #ovStatus { color: #7d8a6a; font-size: 14px; min-height: 20px; }
+  #hud { position: fixed; top: 10px; left: 12px; font-size: 12px; color: #9a8f74; z-index: 5;
+    background: rgba(11,14,18,.55); padding: 6px 10px; border-radius: 4px; line-height: 1.7;
+    pointer-events: none; white-space: pre; display: none; }
+  #controls { position: fixed; top: 10px; right: 12px; z-index: 6; display: none; gap: 12px;
+    background: rgba(11,14,18,.55); padding: 8px 12px; border-radius: 4px; font-size: 13px;
+    align-items: center; }
+  #controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; color: #b8ac8e; }
+  #controls select { font-family: inherit; background: #1a1f27; color: #d8c9a3;
+    border: 1px solid #6b5a3a; border-radius: 3px; padding: 3px 6px; font-size: 13px; }
+  #recBtn, #lockBtn { font-family: inherit; font-size: 13px; padding: 4px 12px; background: transparent;
+    color: #d8c9a3; border: 1px solid #8a7a55; border-radius: 3px; cursor: pointer; min-width: 74px; }
+  #recBtn.rec { color: #ff6b5a; border-color: #ff6b5a; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  #tips { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 5;
+    font-size: 13px; color: #8f8468; background: rgba(11,14,18,.55); padding: 6px 14px;
+    border-radius: 4px; pointer-events: none; display: none; text-align: center; line-height: 1.7;
+    max-width: 92vw; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted autoplay></video>
+
+<div id="overlay">
+  <h1>镜 头 古 琴</h1>
+  <p>七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
+     入席后<b>双手左右平举、静止片刻</b>即「定琴」——琴随身而落,远近大小自适应,<br>
+     此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
+     两手以站位分工:<b>靠岳山(右)侧的手司拨弦</b>,另一只司按弦。<br>
+     拨弦手<b>伸指划过</b>琴弦即响(下扫=滚拂),力度随手速;<b>握拳移动</b>可跨弦换位而不发声;<br>
+     按弦手<b>左右悬指</b>定徽位,移动=走手音,拇食<b>捏合</b>=泛音,垂手离带=散音。<br>
+     <span style="color:#7d8a6a">右上角可切「琴桌·拟真」分区布局,可录制 MP4 演奏视频;<br>
+     若左右手被认反(部分摄像头信号已预翻转),切换右上角「镜像」即可。<br>
+     (需摄像头与联网加载手部模型;无摄像头可鼠标点弦/拖动,Shift+点=泛音,键盘 1–7 散音)</span></p>
+  <button id="startBtn">入 席 抚 琴</button>
+  <div id="ovStatus"></div>
+</div>
+
+<div id="hud"></div>
+<div id="controls">
+  <select id="modeSel">
+    <option value="f" selected>立面 · 悬指</option>
+    <option value="h">琴桌 · 拟真</option>
+  </select>
+  <select id="scoreSel">
+    <option value="" selected>自由弹奏</option>
+    <option value="practice">0 入门 · 散按泛</option>
+    <option value="xingxing">1 小星星 · 移植</option>
+    <option value="laohu">2 两只老虎 · 移植</option>
+    <option value="xianweng">3 仙翁操 · 开指</option>
+    <option value="molihua">4 茉莉花 · 移植</option>
+    <option value="canghai">5 沧海一声笑 · 选段</option>
+    <option value="songbie">6 送别 · 移植</option>
+    <option value="liushui">7 流水 · 泛音意临</option>
+    <option value="jiukuang">8 酒狂 · 意临</option>
+    <option value="yangguan">9 阳关 · 意临</option>
+    <option value="shenren">10 神人畅 · 意临长篇</option>
+  </select>
+  <label><input type="checkbox" id="snapChk" checked> 徽位吸附</label>
+  <label><input type="checkbox" id="tickChk" checked> 徽位提示音</label>
+  <label><input type="checkbox" id="octChk"> 高八度</label>
+  <label title="若系统认反了左右手(摄像头信号源已预翻转),切换此项"><input type="checkbox" id="mirChk" checked> 镜像</label>
+  <button id="lockBtn" title="锁定后双手平举不会重新定琴;点击解锁可重新定琴">🔓 琴位</button>
+  <label title="开:录整个页面(含顶部控件与全部提示,浏览器会弹一次画面选择,请选『此标签页』);关:只录琴面并隐去提示,出干净演奏视频,无弹框"><input type="checkbox" id="recHintChk" checked> 含提示</label>
+  <button id="recBtn">⏺ 录制</button>
+</div>
+<div id="tips"></div>
+
+<script type="module">
+/* ============================================================
+   镜头古琴 —— 单摄像头 + MediaPipe 手部追踪 + Karplus-Strong 弦合成
+   立面模式:琴面竖立朝人、弦仍横陈;手势从摄像头可测量
+   (x/y 位置、平面速度、捏合姿态)第一性推导,不再要求"触弦"
+   ============================================================ */
+
+// ---------- 古琴常量 ----------
+// 正调定弦(仲吕均):一至七弦 C2 D2 F2 G2 A2 C3 D3
+const OPEN_FREQS = [65.406, 73.416, 87.307, 97.999, 110.000, 130.813, 146.832];
+// 十三徽距岳山的弦长比例,及各徽泛音的谐波次数
+const HUI = [1/8, 1/6, 1/5, 1/4, 1/3, 2/5, 1/2, 3/5, 2/3, 3/4, 4/5, 5/6, 7/8];
+const HARM = [8, 6, 5, 4, 3, 5, 2, 5, 3, 4, 5, 6, 8];
+const HUI_NAMES = ['一','二','三','四','五','六','七','八','九','十','十一','十二','十三'];
+const STRING_NAMES = ['一','二','三','四','五','六','七'];
+
+// ---------- 画面几何(比例坐标) ----------
+// 琴体位形:默认铺满画面;「定琴」手势会把它重新落在演奏者双手之间
+const QIN_DEFAULT = { xL: 0.055, xY: 0.945, pluckW: 0.155, yTop: 0.30, dy: 0.062 };
+let qin = { ...QIN_DEFAULT };
+
+// ---------- 状态 ----------
+const canvas = document.getElementById('stage');
+const ctx2d = canvas.getContext('2d');
+const video = document.getElementById('cam');
+let W = 0, H = 0;
+let mode = 'f';                    // 'f' 立面悬指 | 'h' 琴桌拟真
+let audioCtx = null, stringNodes = [], masterReady = false, recDest = null;
+let landmarker = null, cameraOn = false, modelOn = false;
+let statusNote = '';
+let fps = 0, lastDetectT = 0;
+let prevTips = new Map();          // 上一帧指尖位置
+let handSpeed = new Map();         // 每只手腕部速度 EMA(定琴静止判定用)
+let handOpen = new Map();          // 每只手"伸指分"(带衰减峰值):握拳≈0,伸指≥1
+let pinchState = new Map();        // 每只手捏合状态(带滞回,防拨弦瞬间闪断)
+let lastPluckedIdx = -1, pressHandKey = null;
+let pluckHandKey = null, roleSwapT = 0;   // 拨弦手(靠岳山侧,带滞回)
+let pressLine = null;              // 立面模式悬指按弦线 {x, label, pinch}
+let mousePressUntil = 0;
+let mouseHold = null;
+let curTips = [], curHands = [];
+// 定琴 / 距离教练 / 力度显示
+let calibStart = 0, calibProgress = 0, calibMid = null;
+let calibFlashT = -1e9, lastCalibT = -1e9, lastGlobalPluckT = -1e9;
+let lastAmp = 0, lastHuiK = -1, distHint = '';
+let qinLocked = false;             // 琴位锁:锁上后平举静止不再重新定琴
+
+const strings = OPEN_FREQS.map((f) => ({
+  openFreq: f, curFreq: f,
+  pluckAt: -1e9, pluckAmp: 0, lastPluckT: 0, harmonic: false,
+  pressX: null, pressLabel: '',    // 按位显示
+  y: 0,
+}));
+
+const snapChk = document.getElementById('snapChk');
+const octChk = document.getElementById('octChk');
+const tickChk = document.getElementById('tickChk');
+const mirChk = document.getElementById('mirChk');
+const recBtn = document.getElementById('recBtn');
+const modeSel = document.getElementById('modeSel');
+const lockBtn = document.getElementById('lockBtn');
+const recHintChk = document.getElementById('recHintChk');
+function setQinLock(v) {
+  qinLocked = v;
+  lockBtn.textContent = v ? '🔒 琴位' : '🔓 琴位';
+  calibStart = 0; calibProgress = 0;
+}
+lockBtn.addEventListener('click', () => setQinLock(!qinLocked));
+// 镜像开关:摄像头信号源若已预翻转(手机webcam/虚拟摄像头常见),
+// 再翻一次会把左右手认反 —— 此开关同步翻转"画面显示+坐标判定"整条链
+mirChk.checked = localStorage.getItem('qin.mirror') !== '0';
+mirChk.addEventListener('change', () => {
+  localStorage.setItem('qin.mirror', mirChk.checked ? '1' : '0');
+  prevTips.clear(); handSpeed.clear(); handOpen.clear();
+  pluckHandKey = null; pressHandKey = null; pressLine = null; roleSwapT = 0;
+});
+
+// ---------- Karplus-Strong AudioWorklet ----------
+const WORKLET_SRC = [
+'class GuqinString extends AudioWorkletProcessor {',
+'  static get parameterDescriptors() { return [',
+'    { name: "frequency", defaultValue: 110, minValue: 30, maxValue: 2500, automationRate: "k-rate" },',
+'    { name: "t60", defaultValue: 5, minValue: 0.05, maxValue: 20, automationRate: "k-rate" },',
+'    { name: "brightness", defaultValue: 0.55, minValue: 0.05, maxValue: 0.95, automationRate: "k-rate" },',
+'  ]; }',
+'  constructor() { super();',
+'    this.N = Math.ceil(sampleRate / 28) + 8;',
+'    this.buf = new Float32Array(this.N);',
+'    this.w = 0; this.delay = sampleRate / 110; this.lp = 0;',
+'    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
+'    this.port.onmessage = (e) => {',
+'      if (e.data.type === "pluck") {',
+'        this.amp = e.data.amp; this.snapNext = true;',
+'        this.exciteLeft = -1;',
+'      }',
+'    };',
+'  }',
+'  process(inputs, outputs, p) {',
+'    const out = outputs[0][0];',
+'    const f = Math.max(30, p.frequency[0]);',
+'    const target = Math.max(4, sampleRate / f - 0.5);',
+'    const fb = Math.exp(Math.log(0.001) / (f * p.t60[0]));',
+'    const bright = p.brightness[0];',
+'    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
+'    if (this.exciteLeft === -1) this.exciteLeft = Math.max(64, Math.floor(this.delay));',
+'    for (let i = 0; i < out.length; i++) {',
+'      this.delay += (target - this.delay) * 0.0012;',
+'      let rp = this.w - this.delay;',
+'      while (rp < 0) rp += this.N;',
+'      const i0 = rp | 0, i1 = (i0 + 1) % this.N, fr = rp - i0;',
+'      const s = this.buf[i0] * (1 - fr) + this.buf[i1] * fr;',
+'      this.lp += bright * (s - this.lp);',
+'      let v = this.lp * fb;',
+'      if (this.exciteLeft > 0) { v += (Math.random() * 2 - 1) * this.amp; this.exciteLeft--; }',
+'      this.buf[this.w] = v;',
+'      this.w = (this.w + 1) % this.N;',
+'      out[i] = v;',
+'    }',
+'    return true;',
+'  }',
+'}',
+'registerProcessor("guqin-string", GuqinString);',
+].join('\n');
+
+async function initAudio() {
+  audioCtx = new AudioContext({ latencyHint: 'interactive' });
+  const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+  await audioCtx.audioWorklet.addModule(url);
+
+  const shelf = new BiquadFilterNode(audioCtx, { type: 'lowshelf', frequency: 160, gain: 3.5 });
+  const body1 = new BiquadFilterNode(audioCtx, { type: 'peaking', frequency: 320, Q: 1.2, gain: 2.5 });
+  const body2 = new BiquadFilterNode(audioCtx, { type: 'peaking', frequency: 1400, Q: 1.0, gain: -1.5 });
+  const roll  = new BiquadFilterNode(audioCtx, { type: 'lowpass', frequency: 5200, Q: 0.6 });
+  const comp  = new DynamicsCompressorNode(audioCtx, { threshold: -20, ratio: 3, attack: 0.004, release: 0.2 });
+  const master = new GainNode(audioCtx, { gain: 0.85 });
+  shelf.connect(body1).connect(body2).connect(roll).connect(comp).connect(master).connect(audioCtx.destination);
+  recDest = audioCtx.createMediaStreamDestination();
+  master.connect(recDest);
+
+  stringNodes = strings.map((s, i) => {
+    const node = new AudioWorkletNode(audioCtx, 'guqin-string', { outputChannelCount: [1] });
+    node.parameters.get('frequency').value = s.openFreq;
+    node.parameters.get('t60').value = 7.5 - i * 0.45;
+    const g = new GainNode(audioCtx, { gain: 0.9 });
+    node.connect(g).connect(shelf);
+    return node;
+  });
+  await audioCtx.resume();
+  masterReady = true;
+}
+
+function octMul() { return octChk.checked ? 2 : 1; }
+
+function setStringFreq(i, freq) {
+  strings[i].curFreq = freq;
+  if (masterReady) stringNodes[i].parameters.get('frequency').value = freq * octMul();
+}
+
+// opts: {label, harmonic, t60mul, brightOverride, plyBonus, pressX}
+function pluck(i, amp, freq, opts = {}) {
+  const now = performance.now();
+  if (now - strings[i].lastPluckT < 90) return;
+  const s = strings[i];
+  s.lastPluckT = now; s.pluckAt = now; s.pluckAmp = amp;
+  s.harmonic = !!opts.harmonic;
+  s.pressX = opts.pressX ?? null;
+  s.pressLabel = opts.label || '';
+  lastGlobalPluckT = now; lastAmp = amp;
+  setStringFreq(i, freq);
+  if (masterReady) {
+    const node = stringNodes[i];
+    node.parameters.get('t60').value =
+      (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
+    const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
+    node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55 });
+  }
+  if (!opts.noJudge) judgeNote(i, opts);
+  console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
+}
+
+// ---------- 按位 → 音高 ----------
+function nearestHuiIdx(f) {
+  let best = 0, bd = 1;
+  for (let k = 0; k < HUI.length; k++) {
+    const d = Math.abs(f - HUI[k]);
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+
+// 由弦长比例 f 得按音信息(含徽位吸附与标注)
+function pressFromFraction(fRaw) {
+  let f = Math.min(1, Math.max(0.25, fRaw));
+  let label = '';
+  const k = nearestHuiIdx(f), d = Math.abs(f - HUI[k]);
+  if (snapChk.checked && d < 0.014 && HUI[k] >= 0.25) { f = HUI[k]; label = HUI_NAMES[k] + '徽'; }
+  else if (d < 0.03) label = '≈' + HUI_NAMES[k] + '徽';
+  return { f, label };
+}
+
+// ---------- 几何 ----------
+function refreshGeom() {
+  strings.forEach((s, i) => { s.y = (qin.yTop + i * qin.dy) * H; });
+}
+function layout() {
+  W = canvas.width = window.innerWidth * devicePixelRatio;
+  H = canvas.height = window.innerHeight * devicePixelRatio;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  refreshGeom();
+}
+window.addEventListener('resize', layout);
+layout();
+
+// 弦体几何(两模式共用:岳山在右,徽位向左;qin 可被「定琴」手势重设)
+function pluckZoneX() { return (qin.xY - qin.pluckW) * W; }
+function inPluckZone(x) { return x >= pluckZoneX() && x <= (qin.xY + 0.02) * W; }
+function inFingerZone(x) { return x >= qin.xL * W && x < pluckZoneX() - 0.005 * W; }
+function hFracAt(x) {  // x → 距岳山弦长比
+  const L = (qin.xY - qin.xL) * W;
+  return ((qin.xY * W) - x) / L;
+}
+function hXOf(f) { return (qin.xY - f * (qin.xY - qin.xL)) * W; }
+// 立面模式:按弦手须举入弦带(上下各留两弦距),垂手离带=散音
+function bandTop() { return strings[0].y - qin.dy * H * 2; }
+function bandBot() { return strings[6].y + qin.dy * H * 2; }
+
+// cover-fit:归一化 landmark → 画布坐标(镜像开关同步作用于此与画面绘制)
+function mapPoint(lm) {
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  const s = Math.max(W / vw, H / vh);
+  const ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
+  const x = lm.x * vw * s + ox;
+  return [mirChk.checked ? W - x : x, lm.y * vh * s + oy];
+}
+
+// ---------- 摄像头 & 手部模型 ----------
+async function initCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false,
+  });
+  video.srcObject = stream;
+  await video.play();
+  cameraOn = true;
+}
+
+async function initHands() {
+  const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+  const fileset = await vision.FilesetResolver.forVisionTasks(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+      delegate: 'GPU',
+    },
+    runningMode: 'VIDEO', numHands: 2,
+  });
+  modelOn = true;
+}
+
+// ---------- 手势 → 演奏 ----------
+const TIP_IDS = [4, 8, 12, 16, 20];
+
+function readHands(ts) {
+  const t0 = performance.now();
+  const res = landmarker.detectForVideo(video, ts);
+  fps = fps * 0.9 + 0.1 * (1000 / Math.max(1, performance.now() - t0 + 16));
+
+  curHands = []; curTips = [];
+  const labelCount = {};
+  for (let h = 0; h < res.landmarks.length; h++) {
+    const lms = res.landmarks[h];
+    const label = res.handedness?.[h]?.[0]?.categoryName || 'H';
+    labelCount[label] = (labelCount[label] || 0) + 1;
+    const key = label + labelCount[label];
+    const [wx, wy] = mapPoint(lms[0]);
+    const [mx, my] = mapPoint(lms[9]);
+    const [tx4, ty4] = mapPoint(lms[4]);
+    const [tx8, ty8] = mapPoint(lms[8]);
+    const handSize = Math.hypot(mx - wx, my - wy) || 1;
+    // 捏合带滞回:进入 0.38 / 退出 0.50,防拨弦瞬间手形微动闪断泛音
+    const wasPinch = pinchState.get(key) || false;
+    const pinch = Math.hypot(tx8 - tx4, ty8 - ty4) < handSize * (wasPinch ? 0.50 : 0.38);
+    pinchState.set(key, pinch);
+    // 腕部速度 EMA(以手掌为尺,与距离无关)
+    const prevW = prevTips.get(key + ':w');
+    const sp = prevW ? Math.hypot(wx - prevW.x, wy - prevW.y) / handSize : 0;
+    const ema = (handSpeed.get(key) || 0) * 0.8 + sp * 0.2;
+    handSpeed.set(key, ema);
+    prevTips.set(key + ':w', { x: wx, y: wy });
+
+    // "触弦态"手指判定(食中名小):满足其一即算——
+    //  a) 径向伸直:指尖比第二关节离腕更远(平伸划弦)
+    //  b) 纵深前探:指尖 z 比第二关节明显更靠近镜头(勾/撮的弯指爪形,
+    //     二维投影里指尖落在掌上、与拳无异,必须用深度区分)
+    // 全部收拢折回掌心 = 拳 = 离弦静默(替代真琴丢失的 z 轴抬手)
+    const normHand = Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1;
+    let ext = 0;
+    for (const [p, t] of [[6, 8], [10, 12], [14, 16], [18, 20]]) {
+      const [px, py] = mapPoint(lms[p]);
+      const [tx, ty] = mapPoint(lms[t]);
+      const radial = Math.hypot(tx - wx, ty - wy) > Math.hypot(px - wx, py - wy);
+      const zFwd = (lms[t].z - lms[p].z) < -0.3 * normHand;
+      if (radial || zFwd) ext++;
+    }
+    // 拇指单独判(托/擘指型:四指收拢、拇指外伸,同样是"触弦态")
+    const [ix5, iy5] = mapPoint(lms[5]);
+    if (Math.hypot(tx4 - ix5, ty4 - iy5) > handSize * 0.55) ext++;
+    const openScore = Math.max(ext, (handOpen.get(key) || 0) * 0.85);
+    handOpen.set(key, openScore);
+
+    const tips = TIP_IDS.map(t => {
+      const [x, y] = mapPoint(lms[t]);
+      return { x, y, id: t, key: key + ':' + t, size: handSize, hand: key };
+    });
+    curTips.push(...tips);
+    curHands.push({ key, wx, wy, tips, pinch, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize });
+  }
+
+  // 距离教练:手掌成像大小 → 提示与摄像头的合适距离
+  if (curHands.length) {
+    const sN = curHands.reduce((a, h) => a + h.size, 0) / curHands.length / H;
+    distHint = sN < 0.05 ? '距离偏远·建议前移' : sN > 0.18 ? '距离偏近·建议后退' : '距离合适';
+  } else distHint = '未见手';
+}
+
+// 定琴:双手左右平举、静止 1.2 秒 → 琴落在双手之间,尺寸随身材/距离自适应
+// 定成后自动上锁(qinLocked),看谱悬停不会误触发;点右上「🔒琴位」解锁可重定
+function tryCalibrate(now) {
+  if (qinLocked || curHands.length !== 2 || now - lastGlobalPluckT < 2500 || now - lastCalibT < 3000) {
+    calibStart = 0; calibProgress = 0; return;
+  }
+  const [a, b] = curHands;
+  const still = a.speed < 0.025 && b.speed < 0.025;
+  const level = Math.abs(a.wy - b.wy) < 0.18 * H;
+  const apart = Math.abs(a.wx - b.wx) > 0.30 * W;
+  if (!(still && level && apart)) { calibStart = 0; calibProgress = 0; return; }
+  if (!calibStart) calibStart = now;
+  calibProgress = Math.min(1, (now - calibStart) / 1200);
+  calibMid = { x: (a.wx + b.wx) / 2, y: (a.wy + b.wy) / 2 };
+  if (calibProgress >= 1) {
+    const sizeN = (a.size + b.size) / 2 / H;
+    const dy = Math.min(0.09, Math.max(0.032, sizeN * 0.55));
+    const yMid = (a.wy + b.wy) / 2 / H;
+    qin.xL = Math.max(0.01, Math.min(a.wx, b.wx) / W - 0.02);
+    qin.xY = Math.min(0.99, Math.max(a.wx, b.wx) / W + 0.02);
+    qin.dy = dy;
+    qin.yTop = Math.min(0.9 - 7 * dy, Math.max(0.05, yMid - 3 * dy));
+    refreshGeom();
+    lastCalibT = now; calibFlashT = now;
+    setQinLock(true);              // 定成即锁,防止看谱悬停时反复重定
+    // 定琴罄音:一弦七徽泛音(不参与跟谱判定)
+    pluck(0, 0.5, strings[0].openFreq * 2, { harmonic: true, label: '定琴', t60mul: 0.6, brightOverride: 0.2, noJudge: true });
+  }
+}
+
+// ---------- 跟谱模式(减字谱识读互动) ----------
+// 减字谱本是"指位谱"而非节奏谱:只记左手何徽、右手何弦、声型(散/按/泛)。
+// 判定只看出音效果:弦对 + 徽位在容差内 + 声型对 → 前进;不卡节奏,自走式。
+// note: {s:弦1-7, t:'s'散|'a'按|'f'泛, h:徽位下标(HUI), ly:唱词}
+// P(乐句音位, 逐字歌词):[[弦,声型,徽位],...] + 歌词串 → 音符数组
+// 音高映射(正调):散一~七=1 2 4 5 6 1' 2';按一/四·十一徽=3/7;按四·八徽=3';
+// 按四/五/六/七·七徽=5' 6' 1'' 2'';泛·七徽=倍频,泛·九徽=三倍频
+const P = (spec, ly) => spec.map(([s, t, h], i) => ({ s, t, h, ly: ly && ly[i] !== '~' ? ly[i] : undefined }));
+// 曲库:1-2 几乎全散音 → 3 散按对答 → 4-6 多按位 → 7 泛音专项 → 8-10 意临古曲
+// 「移植」=旋律照原曲;「意临」=无法逐音打谱的古曲,取其调式织体气韵的致意改编
+const SCORES = {
+  practice: { name: '入门 · 散按泛', notes: [
+    ...P([[1,'s'],[2,'s'],[3,'s'],[4,'s'],[5,'s'],[6,'s'],[7,'s']]),
+    ...P([[4,'a',6],[4,'a',8],[5,'a',6]]),
+    ...P([[6,'f',6],[4,'f',6]]),
+  ] },
+  xingxing: { name: '小星星 · 移植', notes: [
+    ...P([[1,'s'],[1,'s'],[4,'s'],[4,'s'],[5,'s'],[5,'s'],[4,'s']], '一闪一闪亮晶晶'),
+    ...P([[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s'],[2,'s'],[1,'s']], '满天都是小星星'),
+    ...P([[4,'s'],[4,'s'],[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s']], '挂在天空放光明'),
+    ...P([[4,'s'],[4,'s'],[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s']], '好像许多小眼睛'),
+    ...P([[1,'s'],[1,'s'],[4,'s'],[4,'s'],[5,'s'],[5,'s'],[4,'s']], '一闪一闪亮晶晶'),
+    ...P([[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s'],[2,'s'],[1,'s']], '满天都是小星星'),
+  ] },
+  laohu: { name: '两只老虎 · 移植', notes: [
+    ...P([[1,'s'],[2,'s'],[1,'a',10],[1,'s']], '两只老虎'),
+    ...P([[1,'s'],[2,'s'],[1,'a',10],[1,'s']], '两只老虎'),
+    ...P([[1,'a',10],[3,'s'],[4,'s']], '跑得快'),
+    ...P([[1,'a',10],[3,'s'],[4,'s']], '跑得快'),
+    ...P([[4,'s'],[5,'s'],[4,'s'],[3,'s'],[1,'a',10],[1,'s']], '一只没有耳朵'),
+    ...P([[4,'s'],[5,'s'],[4,'s'],[3,'s'],[1,'a',10],[1,'s']], '一只没有尾巴'),
+    ...P([[1,'s'],[4,'s'],[1,'s']], '真奇怪'),
+    ...P([[1,'s'],[4,'s'],[1,'s']], '真奇怪'),
+  ] },
+  xianweng: { name: '仙翁操 · 开指', notes: [
+    ...P([[3,'a',8],[6,'s']], '仙翁'), ...P([[3,'a',8],[6,'s']], '仙翁'),
+    ...P([[2,'a',8],[5,'s']], '仙翁'), ...P([[2,'a',8],[5,'s']], '仙翁'),
+    ...P([[1,'a',8],[4,'s']], '仙翁'), ...P([[1,'a',8],[4,'s']], '仙翁'),
+    ...P([[2,'a',6],[7,'s']], '得道'), ...P([[3,'a',8],[6,'s']], '仙翁'),
+  ] },
+  molihua: { name: '茉莉花 · 移植', notes: [
+    ...P([[1,'a',10],[1,'a',10],[4,'s'],[5,'s'],[6,'s'],[6,'s'],[5,'s'],[4,'s'],[4,'s'],[5,'s'],[4,'s']], '好一朵美丽的茉莉花~~'),
+    ...P([[1,'a',10],[1,'a',10],[4,'s'],[5,'s'],[6,'s'],[6,'s'],[5,'s'],[4,'s'],[4,'s'],[5,'s'],[4,'s']], '好一朵美丽的茉莉花~~'),
+    ...P([[1,'a',10],[2,'s'],[1,'a',10],[4,'s'],[1,'a',10],[2,'s'],[1,'s']], '又香又白人人夸'),
+  ] },
+  canghai: { name: '沧海一声笑 · 选段', notes: [
+    ...P([[5,'a',6],[4,'a',6],[4,'a',7],[7,'s'],[6,'s']], '沧海一声笑'),
+    ...P([[4,'a',7],[7,'s'],[6,'s'],[5,'s'],[4,'s']], '滔滔两岸潮'),
+    ...P([[5,'s'],[6,'s'],[7,'s'],[4,'a',7],[7,'s'],[6,'s'],[5,'s'],[4,'s']], '浮沉随浪只记今朝'),
+    ...P([[6,'f',6],[4,'f',6],[6,'f',6]], '泛音收'),
+  ] },
+  songbie: { name: '送别 · 移植', notes: [
+    ...P([[4,'s'],[1,'a',10],[4,'s'],[6,'s']], '长亭外~'),
+    ...P([[4,'a',10],[5,'s'],[6,'s'],[4,'s']], '古道边~'),
+    ...P([[4,'s'],[1,'s'],[2,'s'],[1,'a',10],[2,'s'],[1,'s'],[2,'s']], '芳草碧连天~~'),
+  ] },
+  liushui: { name: '流水 · 泛音意临', notes: [
+    ...P([[1,'f',6],[2,'f',6],[4,'f',6],[5,'f',6],[6,'f',6],[7,'f',6]], '流~~~~水'),
+    ...P([[7,'f',6],[6,'f',6],[5,'f',6],[4,'f',6],[2,'f',6],[1,'f',6]]),
+    ...P([[4,'f',8],[2,'f',8],[1,'f',8],[1,'f',6]], '~~余韵'),
+  ] },
+  jiukuang: { name: '酒狂 · 意临', notes: [
+    ...P([[5,'s'],[6,'s'],[5,'s'],[4,'a',7],[6,'s'],[5,'s']], '酒'),
+    ...P([[5,'s'],[6,'s'],[5,'s'],[4,'a',7],[6,'s'],[5,'s']]),
+    ...P([[5,'s'],[6,'s'],[5,'s'],[7,'s'],[6,'s'],[5,'s']], '狂'),
+    ...P([[5,'s'],[6,'s'],[5,'s'],[7,'s'],[6,'s'],[5,'s']]),
+  ] },
+  yangguan: { name: '阳关 · 意临', notes: [
+    ...P([[5,'s'],[6,'s'],[7,'s'],[4,'a',7],[7,'s'],[6,'s'],[5,'s'],[4,'s']], '阳'),
+    ...P([[5,'s'],[6,'s'],[7,'s'],[4,'a',7],[4,'a',6],[4,'a',7],[7,'s'],[6,'s']], '关'),
+    ...P([[7,'s'],[6,'s'],[5,'s'],[6,'s']]),
+  ] },
+  shenren: { name: '神人畅 · 意临长篇', notes: [
+    // I 泛音开指
+    ...P([[5,'f',6],[6,'f',6],[7,'f',6],[6,'f',6],[5,'f',6],[4,'f',6],[5,'f',6],[5,'f',6],[7,'f',6],[6,'f',6],[5,'f',6],[4,'f',6]], '神'),
+    // II 低音吟诵(反复三遍,上古祝祷的复沓)
+    ...P([[5,'s'],[5,'s'],[6,'s'],[7,'s'],[6,'s'],[5,'s'],[4,'s'],[5,'s']], '人'),
+    ...P([[5,'s'],[5,'s'],[6,'s'],[7,'s'],[6,'s'],[5,'s'],[4,'s'],[5,'s']]),
+    ...P([[5,'s'],[5,'s'],[6,'s'],[7,'s'],[6,'s'],[5,'s'],[4,'s'],[5,'s']]),
+    // III 中段升腾(按音高区应答)
+    ...P([[5,'a',6],[6,'a',6],[7,'a',6],[6,'a',6],[5,'a',6],[4,'a',6],[7,'s'],[6,'s']], '以'),
+    ...P([[5,'a',6],[6,'a',6],[7,'a',6],[6,'a',6],[5,'a',6],[4,'a',6],[7,'s'],[6,'s']]),
+    ...P([[5,'a',6],[6,'a',6],[7,'a',6],[6,'a',6],[5,'a',6],[4,'a',6],[7,'s'],[6,'s']]),
+    // IV 泛音收束(归于羽音)
+    ...P([[5,'f',6],[4,'f',6],[5,'f',6],[6,'f',6],[5,'f',6],[4,'f',6],[2,'f',8],[5,'f',6],[4,'f',8],[6,'f',6],[2,'f',8],[5,'f',6]], '畅'),
+  ] },
+};
+let game = null;
+
+// 魏碑体(macOS 自带 Weibei SC),谱面文字的书法气息;逐级回退楷体/宋体
+const JZ_FONT = '"Weibei SC","Weibei TC","Kaiti SC","STKaiti","Songti SC",serif';
+// 命中鼓励语,按连击分级(多邻国式)
+const PRAISE = {
+  base: ['好!', '准!', '妙', '正是', '有韵味'],
+  good: ['弹得真准!', '渐入佳境', '指下生风'],
+  super: ['太好了,弹得又准又美!', '行云流水,气韵生动!', '连珠妙音!'],
+  comeback: ['找回来了!', '对,就是这个位置'],
+};
+
+function gameSet(key) {
+  game = key && SCORES[key] ? {
+    key, notes: SCORES[key].notes, idx: 0, hit: 0, miss: 0,
+    flashT: -1e9, flashOk: true, hint: '', hintT: -1e9, doneT: 0,
+  } : null;
+}
+
+function typeName(t) { return t === 's' ? '散' : t === 'a' ? '按' : '泛'; }
+function noteDesc(n) {
+  return (n.t === 's' ? '散音' : typeName(n.t) + HUI_NAMES[n.h] + '徽') + ' · ' + STRING_NAMES[n.s - 1] + '弦';
+}
+
+function judgeNote(i, opts) {
+  if (!game || game.doneT) return;
+  const now = performance.now();
+  const exp = game.notes[game.idx];
+  let ok = false, hint = '';
+  if (i !== exp.s - 1) hint = '应弹 ' + STRING_NAMES[exp.s - 1] + ' 弦';
+  else if (exp.t === 's') {
+    if (opts.harmonic) hint = '要散音,松开捏合';
+    else if (opts.pressF != null) hint = '要散音,按弦手垂下离带';
+    else ok = true;
+  } else if (exp.t === 'a') {
+    if (opts.harmonic) hint = '要按音,不要捏合';
+    else if (opts.pressF == null) hint = '要按音,悬指到' + HUI_NAMES[exp.h] + '徽';
+    else if (Math.abs(opts.pressF - HUI[exp.h]) < 0.035) ok = true;
+    else hint = '徽位' + (opts.pressF > HUI[exp.h] ? '偏低,向岳山(右)移' : '偏高,向龙龈(左)移');
+  } else {
+    if (!opts.harmonic) hint = '要泛音:拇食捏合再拨';
+    // 同弦同倍频的徽位出音全同(如五徽/九徽都是三倍频),按"出音效果"判对
+    else if (opts.huiK === exp.h || HARM[opts.huiK] === HARM[exp.h]) ok = true;
+    else hint = '泛音位应在' + HUI_NAMES[exp.h] + '徽';
+  }
+  game.flashT = now; game.flashOk = ok;
+  if (ok) {
+    game.hit++; game.hint = '';
+    // 命中动画:减字牌溶解上浮 + 弦上涟漪
+    game.lastHit = { n: exp, t: now, x: opts.plX ?? opts.pressX ?? W / 2, y: strings[i].y };
+    // 鼓励语:按连击分级,失误后找回另有一档
+    game.streak = (game.streak || 0) + 1;
+    const pool = game.streak >= 5 ? PRAISE.super
+      : game.streak >= 3 ? PRAISE.good
+      : game.lastWasMiss ? PRAISE.comeback : PRAISE.base;
+    game.praise = { text: pool[(Math.random() * pool.length) | 0], t: now };
+    game.lastWasMiss = false;
+    game.idx++;
+    if (game.idx >= game.notes.length) game.doneT = now;
+  } else {
+    game.miss++; game.hint = hint; game.hintT = now;
+    game.streak = 0; game.lastWasMiss = true;
+  }
+  console.log(`[谱] ${ok ? '✓' : '✗'} 第${game.doneT ? game.notes.length : game.idx + (ok ? 0 : 1)}音 ${noteDesc(exp)} ${hint}`);
+}
+
+// 徽位提示音:盲弹时的听觉校准(经过徽位轻轻一嗒)
+function huiTick() {
+  if (!masterReady || !tickChk.checked) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.frequency.value = 2400;
+  g.gain.setValueAtTime(0.035, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.03);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.04);
+}
+
+function playFacade() {
+  const now = performance.now();
+  tryCalibrate(now);
+
+  // 1) 角色分配:捏合手势 = 明确宣告"我是按弦手"(优先于站位);
+  //    否则按站位定(古琴语法:靠岳山右侧的手司弹),0.5s 滞回防瞬时交叉误换
+  let pressH = null;
+  if (curHands.length >= 2) {
+    const pinched = curHands.filter(hd => hd.pinch);
+    if (pinched.length === 1) {
+      pressH = pinched[0];
+      const other = curHands.find(hd => hd.key !== pressH.key);
+      if (other) { pluckHandKey = other.key; roleSwapT = 0; }
+    } else {
+      const sorted = [...curHands].sort((a, b) => b.wx - a.wx);
+      const cur = curHands.find(h => h.key === pluckHandKey);
+      if (!cur) { pluckHandKey = sorted[0].key; roleSwapT = 0; }
+      else if (sorted[0].key !== pluckHandKey && sorted[0].wx > cur.wx + 0.06 * W) {
+        if (!roleSwapT) roleSwapT = now;
+        if (now - roleSwapT > 500) { pluckHandKey = sorted[0].key; roleSwapT = 0; }
+      } else roleSwapT = 0;
+      pressH = curHands.find(h => h.key !== pluckHandKey) || null;
+    }
+  } else if (curHands.length === 1) {
+    pluckHandKey = curHands[0].key; roleSwapT = 0;
+  }
+  pressHandKey = pressH ? pressH.key : null;
+
+  // 2) 按弦手举入弦带才生效,其横坐标 = 徽位;垂手离带 = 散音
+  let pressInfo = null;
+  if (pressH && pressH.idxTipY > bandTop() && pressH.idxTipY < bandBot()
+      && pressH.idxTipX > qin.xL * W && pressH.idxTipX < (qin.xY + 0.02) * W) {
+    const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressH.idxTipX)));
+    if (pressH.pinch) {
+      const k = nearestHuiIdx(fRaw);
+      pressInfo = { pinch: true, k, label: '泛·' + HUI_NAMES[k] + '徽', x: hXOf(HUI[k]) };
+    } else {
+      const pr = pressFromFraction(fRaw);
+      pressInfo = { pinch: false, f: pr.f, label: pr.label, x: hXOf(pr.f) };
+      // 盲弹听觉校准:悬指经过徽位时轻响一声
+      const kNear = nearestHuiIdx(fRaw);
+      if (Math.abs(fRaw - HUI[kNear]) < 0.010) {
+        if (kNear !== lastHuiK) { huiTick(); lastHuiK = kNear; }
+      } else lastHuiK = -1;
+    }
+    pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch };
+  } else {
+    lastHuiK = -1;
+    if (now > mousePressUntil) pressLine = null;
+  }
+
+  // 3) 拨弦:仅拨弦手、且伸着手指时,指尖纵向穿过弦线才发声;
+  //    握拳过弦 = 换弦移动,不响(指的收拢 = 真琴上手指抬离弦面);
+  //    力度以手掌为尺(vn = 像素速度/手掌大小)→ 与距离无关
+  for (const hd of curHands) {
+    const isPress = pressH && hd.key === pressH.key;
+    const canPluck = !isPress && (handOpen.get(hd.key) || 0) >= 0.8;
+    for (const tip of hd.tips) {
+      const prev = prevTips.get(tip.key);
+      if (prev && canPluck &&
+          tip.x > (qin.xL - 0.02) * W && tip.x < (qin.xY + 0.03) * W) {
+        const vn = Math.abs(tip.y - prev.y) / hd.size;
+        if (vn > 0.055) {
+          for (let i = 0; i < 7; i++) {
+            const sy = strings[i].y;
+            if ((prev.y - sy) * (tip.y - sy) < 0) {
+              const amp = Math.min(1, 0.15 + 0.85 * Math.tanh(vn * 4));
+              fPluck(i, amp, pressInfo, tip.x, hd.key);
+            }
+          }
+        }
+      }
+      prevTips.set(tip.key, { x: tip.x, y: tip.y });
+    }
+  }
+
+  // 4) 走手音:按弦手左右移动 → 最近所奏之弦连续变调(泛音除外)
+  if (pressInfo && !pressInfo.pinch && lastPluckedIdx >= 0) {
+    const s = strings[lastPluckedIdx];
+    if (!s.harmonic && now - s.pluckAt < 9000) {
+      const freq = s.openFreq / pressInfo.f;
+      if (Math.abs(freq - s.curFreq) > 0.3) setStringFreq(lastPluckedIdx, freq);
+      s.pressX = pressInfo.x; s.pressLabel = pressInfo.label;
+    }
+  }
+}
+
+function fPluck(i, amp, pressInfo, plX, handKey) {
+  const t = (plX - qin.xL * W) / ((qin.xY - qin.xL) * W);
+  const plyBonus = (Math.min(1, Math.max(0, t)) - 0.5) * 0.18;  // 近岳山处拨弦更亮
+  let freq = strings[i].openFreq, opts = { plyBonus };
+  if (pressInfo && pressInfo.pinch) {
+    freq = strings[i].openFreq * HARM[pressInfo.k];
+    opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.5, brightOverride: 0.22 };
+    amp *= 0.75;
+  } else if (pressInfo) {
+    freq = strings[i].openFreq / pressInfo.f;
+    opts.label = pressInfo.label;
+    opts.pressX = pressInfo.x;
+    opts.pressF = pressInfo.f;
+  }
+  opts.plX = plX;
+  pluck(i, amp, freq, opts);
+  lastPluckedIdx = i;
+}
+
+function playHorizontal() {
+  const now = performance.now();
+  const tol = qin.dy * H * 0.42;
+
+  // 1) 按弦:左区指尖落在哪根弦上
+  const pressOn = new Array(7).fill(null);
+  for (const tip of curTips) {
+    if (!inFingerZone(tip.x)) continue;
+    for (let i = 0; i < 7; i++) {
+      const d = Math.abs(tip.y - strings[i].y);
+      if (d < tol && (!pressOn[i] || d < Math.abs(pressOn[i].y - strings[i].y))) pressOn[i] = tip;
+    }
+  }
+
+  // 2) 拨弦:右区指尖垂直穿过弦线(力度以手掌为尺;握拳过弦不响)
+  for (const tip of curTips) {
+    const prev = prevTips.get(tip.key);
+    if (prev && inPluckZone(tip.x) && (handOpen.get(tip.hand) || 0) >= 0.8) {
+      const vn = Math.abs(tip.y - prev.y) / tip.size;
+      if (vn > 0.055) {
+        for (let i = 0; i < 7; i++) {
+          const sy = strings[i].y;
+          if ((prev.y - sy) * (tip.y - sy) < 0) {
+            const amp = Math.min(1, 0.15 + 0.85 * Math.tanh(vn * 4));
+            let freq = strings[i].openFreq, opts = { plX: tip.x };
+            if (pressOn[i]) {
+              const pr = pressFromFraction(hFracAt(pressOn[i].x));
+              freq = strings[i].openFreq / pr.f;
+              opts = { label: pr.label, pressX: hXOf(pr.f), pressF: pr.f, plX: tip.x };
+            }
+            pluck(i, amp, freq, opts);
+            lastPluckedIdx = i;
+          }
+        }
+      }
+    }
+    prevTips.set(tip.key, { x: tip.x, y: tip.y });
+  }
+
+  // 3) 走手音
+  for (let i = 0; i < 7; i++) {
+    const sounding = now - strings[i].pluckAt < 9000;
+    if (sounding && pressOn[i]) {
+      const pr = pressFromFraction(hFracAt(pressOn[i].x));
+      const freq = strings[i].openFreq / pr.f;
+      if (Math.abs(freq - strings[i].curFreq) > 0.3) setStringFreq(i, freq);
+      strings[i].pressX = hXOf(pr.f);
+      strings[i].pressLabel = pr.label;
+    }
+    if (!pressOn[i]) strings[i].pressX = null;
+  }
+}
+
+function processHands(ts) {
+  if (!modelOn || !cameraOn || video.readyState < 2) return;
+  if (ts - lastDetectT < 1) return;
+  lastDetectT = ts;
+  readHands(ts);
+  if (mode === 'f') playFacade(); else playHorizontal();
+  // 清理消失的指尖/手
+  const alive = new Set(curTips.map(t => t.key));
+  for (const hd of curHands) alive.add(hd.key + ':w');
+  for (const k of [...prevTips.keys()]) if (!alive.has(k)) prevTips.delete(k);
+}
+
+// ---------- 渲染 ----------
+const dpr = () => devicePixelRatio;
+
+function drawCamera() {
+  if (cameraOn && video.readyState >= 2) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const s = Math.max(W / vw, H / vh);
+    const dw = vw * s, dh = vh * s;
+    ctx2d.save();
+    if (mirChk.checked) { ctx2d.translate(W, 0); ctx2d.scale(-1, 1); }
+    ctx2d.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    ctx2d.restore();
+    ctx2d.fillStyle = 'rgba(8,10,14,0.42)';
+    ctx2d.fillRect(0, 0, W, H);
+  } else {
+    ctx2d.fillStyle = '#12161c';
+    ctx2d.fillRect(0, 0, W, H);
+  }
+}
+
+function stringStroke(i, now) {
+  const s = strings[i];
+  const age = (now - s.pluckAt) / 1000;
+  const vib = age < 3 ? Math.exp(-age * 2.2) * s.pluckAmp * 7 * dpr() : 0;
+  ctx2d.lineWidth = (3.4 - i * 0.32) * dpr();
+  ctx2d.strokeStyle = age < 0.4
+    ? (s.harmonic ? '#b8e4f0' : '#f0e2b8')
+    : 'rgba(201,183,135,0.8)';
+  return vib;
+}
+
+function drawHorizontal(now, facade, clean) {
+  const xL = qin.xL * W, xY = qin.xY * W, xB = pluckZoneX();
+  const yTop = strings[0].y, yBot = strings[6].y;
+  const pad = qin.dy * H;
+
+  if (!facade) {  // 拟真模式才有岳山旁的专属拨弦区
+    ctx2d.fillStyle = 'rgba(216,201,163,0.07)';
+    ctx2d.fillRect(xB, yTop - pad, xY - xB, yBot - yTop + pad * 2);
+  }
+
+  ctx2d.lineWidth = 6 * dpr();
+  ctx2d.strokeStyle = '#6b5a3a';
+  for (const x of [xY, xL]) {
+    ctx2d.beginPath(); ctx2d.moveTo(x, yTop - pad); ctx2d.lineTo(x, yBot + pad); ctx2d.stroke();
+    ctx2d.lineWidth = 2.5 * dpr();
+  }
+
+  ctx2d.font = `${11 * dpr()}px serif`;
+  ctx2d.textAlign = 'center';
+  for (let k = 0; k < HUI.length; k++) {
+    const x = xY - HUI[k] * (xY - xL);
+    ctx2d.strokeStyle = 'rgba(216,201,163,0.10)';
+    ctx2d.lineWidth = 1 * dpr();
+    ctx2d.beginPath(); ctx2d.moveTo(x, yTop - pad * 0.5); ctx2d.lineTo(x, yBot + pad * 0.5); ctx2d.stroke();
+    ctx2d.fillStyle = '#c9b787';
+    ctx2d.beginPath(); ctx2d.arc(x, yTop - pad * 0.62, 3.2 * dpr(), 0, 7); ctx2d.fill();
+    ctx2d.fillStyle = 'rgba(201,183,135,0.75)';
+    ctx2d.fillText(HUI_NAMES[k], x, yTop - pad * 0.95);
+  }
+
+  for (let i = 0; i < 7; i++) {
+    const s = strings[i];
+    const vib = stringStroke(i, now);
+    ctx2d.beginPath();
+    if (vib > 0.3) {
+      const seg = 36;
+      for (let j = 0; j <= seg; j++) {
+        const x = xL + (xY - xL) * j / seg;
+        const env = Math.sin(Math.PI * j / seg);
+        const y = s.y + Math.sin(j * 0.9 + now * 0.045) * vib * env;
+        j ? ctx2d.lineTo(x, y) : ctx2d.moveTo(x, y);
+      }
+    } else {
+      ctx2d.moveTo(xL, s.y); ctx2d.lineTo(xY, s.y);
+    }
+    ctx2d.stroke();
+
+    ctx2d.fillStyle = 'rgba(201,183,135,0.7)';
+    ctx2d.textAlign = 'right';
+    ctx2d.font = `${12 * dpr()}px serif`;
+    ctx2d.fillText(STRING_NAMES[i], xL - 8 * dpr(), s.y + 4 * dpr());
+
+    if (s.pressX !== null && !clean) {
+      ctx2d.strokeStyle = '#e8a04c';
+      ctx2d.lineWidth = 2 * dpr();
+      ctx2d.beginPath(); ctx2d.arc(s.pressX, s.y, 9 * dpr(), 0, 7); ctx2d.stroke();
+      if (s.pressLabel) {
+        ctx2d.fillStyle = '#e8a04c';
+        ctx2d.textAlign = 'center';
+        ctx2d.fillText(s.pressLabel, s.pressX, s.y - 14 * dpr());
+      }
+    }
+  }
+
+  // 立面模式:悬指按弦线(竖贯弦带,如无形之指;泛音为月白色)
+  if (facade && pressLine && !clean) {
+    const col = pressLine.pinch ? '#9fd8e8' : '#e8a04c';
+    ctx2d.strokeStyle = col;
+    ctx2d.lineWidth = 2 * dpr();
+    ctx2d.setLineDash([10 * dpr(), 7 * dpr()]);
+    ctx2d.beginPath(); ctx2d.moveTo(pressLine.x, yTop - pad * 0.5); ctx2d.lineTo(pressLine.x, yBot + pad * 0.7); ctx2d.stroke();
+    ctx2d.setLineDash([]);
+    ctx2d.fillStyle = col;
+    ctx2d.textAlign = 'center';
+    ctx2d.font = `${13 * dpr()}px serif`;
+    ctx2d.fillText(pressLine.label || '按', pressLine.x, yBot + pad * 1.15);
+  }
+}
+
+// 减字圆牌:上半徽位(散音记「散」,泛音加角标)、下半弦号 —— 减字谱的上下结构
+function drawJianziTile(x, y, size, n, main, now, forceOk) {
+  const r = size / 2;
+  let bg = 'rgba(11,14,18,0.72)';
+  if (forceOk) bg = 'rgba(80,200,120,0.35)';
+  else if (main && game && now - game.flashT < 350 && !game.flashOk)
+    bg = 'rgba(220,90,80,0.35)';
+  const col = n.t === 'f' ? '#9fd8e8' : n.t === 'a' ? '#e8a04c' : '#c9b787';
+  ctx2d.fillStyle = bg;
+  ctx2d.strokeStyle = col;
+  ctx2d.lineWidth = (main ? 2.5 : 1.2) * dpr();
+  ctx2d.beginPath(); ctx2d.arc(x, y, r, 0, 7);
+  ctx2d.fill(); ctx2d.stroke();
+  ctx2d.fillStyle = col;
+  ctx2d.textAlign = 'center';
+  ctx2d.font = `${size * 0.27}px ${JZ_FONT}`;
+  ctx2d.fillText(n.t === 's' ? '散' : HUI_NAMES[n.h], x, y - size * 0.09);
+  ctx2d.lineWidth = 1 * dpr();
+  ctx2d.beginPath(); ctx2d.moveTo(x - r * 0.5, y); ctx2d.lineTo(x + r * 0.5, y); ctx2d.stroke();
+  ctx2d.font = `${size * 0.29}px ${JZ_FONT}`;
+  ctx2d.fillText(STRING_NAMES[n.s - 1], x, y + size * 0.31);
+  if (n.t === 'f') {
+    ctx2d.font = `${size * 0.16}px ${JZ_FONT}`;
+    ctx2d.fillText('泛', x - r * 0.52, y - r * 0.42);
+  }
+}
+
+// 减字谱近似原貌(右上大字,魏碑体):上=左手(按=徽位数字/散=「艹」/泛加小圆),
+// 下=右手「勹」(勾)怀抱弦号。本器不判定具体指法,右手技法统一以「勾」代表。
+function drawJianziGlyph(x, y, h, n) {
+  ctx2d.textAlign = 'center';
+  ctx2d.fillStyle = 'rgba(232,220,192,0.92)';
+  ctx2d.font = `${h * 0.34}px ${JZ_FONT}`;
+  ctx2d.fillText(n.t === 's' ? '艹' : HUI_NAMES[n.h], x, y - h * 0.16);
+  if (n.t === 'f') {   // 泛音标记:徽位旁一枚小空心圆
+    ctx2d.strokeStyle = 'rgba(159,216,232,0.95)';
+    ctx2d.lineWidth = 2 * dpr();
+    ctx2d.beginPath(); ctx2d.arc(x + h * 0.30, y - h * 0.30, h * 0.055, 0, 7); ctx2d.stroke();
+  }
+  ctx2d.font = `${h * 0.58}px ${JZ_FONT}`;
+  ctx2d.fillText('勹', x + h * 0.04, y + h * 0.34);
+  ctx2d.font = `${h * 0.30}px ${JZ_FONT}`;
+  ctx2d.fillText(STRING_NAMES[n.s - 1], x - h * 0.10, y + h * 0.36);
+}
+
+function drawGame(now) {
+  if (!game) return;
+  if (game.doneT && now - game.doneT > 4000) {
+    game.idx = 0; game.hit = 0; game.miss = 0; game.doneT = 0; game.hint = '';
+  }
+  const cx = W / 2, top = 72 * dpr();
+  const size = 78 * dpr();
+
+  // 命中动画:弦上涟漪扩散 + 减字牌溶解上浮
+  const hitP = game.lastHit ? (now - game.lastHit.t) / 500 : 2;
+  if (hitP < 1) {
+    const hn = game.lastHit.n;
+    const hcol = hn.t === 'f' ? '159,216,232' : '120,232,150';
+    ctx2d.strokeStyle = `rgba(${hcol},${(1 - hitP) * 0.85})`;
+    ctx2d.lineWidth = 2.5 * dpr();
+    ctx2d.beginPath();
+    ctx2d.arc(game.lastHit.x, game.lastHit.y, (12 + 68 * hitP) * dpr(), 0, 7);
+    ctx2d.stroke();
+    ctx2d.globalAlpha = 1 - hitP;
+    drawJianziTile(cx - 80 * dpr(), top + size / 2 - 40 * hitP * dpr(),
+      size * (1 + 0.35 * hitP), hn, true, now, true);
+    ctx2d.globalAlpha = 1;
+  }
+
+  // 鼓励语:左上空白处淡入、上浮、淡出
+  if (game.praise) {
+    const pp = (now - game.praise.t) / 1400;
+    if (pp < 1) {
+      ctx2d.globalAlpha = Math.max(0, pp < 0.15 ? pp / 0.15 : 1 - (pp - 0.15) / 0.85);
+      ctx2d.fillStyle = '#8fe0a8';
+      ctx2d.textAlign = 'center';
+      ctx2d.font = `${21 * dpr()}px ${JZ_FONT}`;
+      ctx2d.fillText(game.praise.text, Math.max(150 * dpr(), W * 0.18), 170 * dpr() - 42 * dpr() * pp);
+      ctx2d.globalAlpha = 1;
+    }
+  }
+
+  if (game.doneT) {
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = '#d8c9a3';
+    ctx2d.font = `${26 * dpr()}px ${JZ_FONT}`;
+    ctx2d.fillText('曲 终', cx, top + 30 * dpr());
+    ctx2d.font = `${14 * dpr()}px serif`;
+    ctx2d.fillText(`命中 ${game.hit} · 误弹 ${game.miss}`, cx, top + 58 * dpr());
+    const acc = game.hit / Math.max(1, game.hit + game.miss);
+    ctx2d.font = `${17 * dpr()}px ${JZ_FONT}`;
+    ctx2d.fillStyle = '#8fe0a8';
+    ctx2d.fillText(acc === 1 ? '满堂彩!一曲既终,余音绕梁' : acc > 0.8 ? '弹得漂亮,再来一遍更佳' : '熟能生巧,再试一次', cx, top + 86 * dpr());
+    return;
+  }
+  const exp = game.notes[game.idx];
+
+  // 右上空白:当前音的减字谱近似原貌(魏碑大字)
+  drawJianziGlyph(W - 150 * dpr(), 140 * dpr(), 118 * dpr(), exp);
+
+  // 投影到琴面:目标弦呼吸辉光 + 目标徽位幽灵线(泛音月白,按音青绿)
+  const gs = strings[exp.s - 1];
+  const gcol = exp.t === 'f' ? '159,216,232' : '120,232,150';
+  const glow = 0.30 + 0.22 * Math.sin(now * 0.006);
+  ctx2d.strokeStyle = `rgba(${gcol},${glow})`;
+  ctx2d.lineWidth = 7 * dpr();
+  ctx2d.beginPath(); ctx2d.moveTo(qin.xL * W, gs.y); ctx2d.lineTo(qin.xY * W, gs.y); ctx2d.stroke();
+  if (exp.t !== 's') {
+    const tx = hXOf(HUI[exp.h]);
+    ctx2d.setLineDash([6 * dpr(), 6 * dpr()]);
+    ctx2d.strokeStyle = `rgba(${gcol},0.85)`;
+    ctx2d.lineWidth = 2 * dpr();
+    ctx2d.beginPath(); ctx2d.moveTo(tx, bandTop()); ctx2d.lineTo(tx, bandBot()); ctx2d.stroke();
+    ctx2d.setLineDash([]);
+    ctx2d.beginPath(); ctx2d.arc(tx, gs.y, 9 * dpr(), 0, 7); ctx2d.stroke();
+  }
+
+  // 减字牌:当前音(大,命中后从队列侧滑入) + 后续两音(小)
+  const slideP = Math.min(1, (now - (game.lastHit ? game.lastHit.t : -1e9)) / 250);
+  drawJianziTile(cx - 80 * dpr() + (1 - slideP) * 70 * dpr(), top + size / 2, size, exp, true, now);
+  const n1 = game.notes[game.idx + 1], n2 = game.notes[game.idx + 2];
+  if (n1) drawJianziTile(cx + 14 * dpr(), top + size / 2 + 12 * dpr(), 50 * dpr(), n1, false, now);
+  if (n2) drawJianziTile(cx + 74 * dpr(), top + size / 2 + 12 * dpr(), 50 * dpr(), n2, false, now);
+
+  // 文案:唱词 + 音位说明 + 进度 + 错弹提示
+  ctx2d.textAlign = 'center';
+  ctx2d.fillStyle = '#d8c9a3';
+  ctx2d.font = `${14 * dpr()}px serif`;
+  const lyr = exp.ly ? `「${exp.ly}」 ` : '';
+  ctx2d.fillText(`${lyr}${noteDesc(exp)}   ${game.idx + 1}/${game.notes.length}`, cx, top + size + 28 * dpr());
+  if (now - game.hintT < 2200 && game.hint) {
+    ctx2d.fillStyle = '#e88a7a';
+    ctx2d.fillText(game.hint + ' (N 跳过)', cx, top + size + 50 * dpr());
+  }
+}
+
+function draw(now) {
+  // 干净录制:「含提示」关闭时,录制期间隐去全部提示层(画面即录制内容)
+  const clean = !!recorder && !recHintChk.checked;
+  ctx2d.clearRect(0, 0, W, H);
+  drawCamera();
+  drawHorizontal(now, mode === 'f', clean);
+  if (!clean) drawGame(now);
+
+  // 定琴进度环 / 落琴闪光
+  if (!clean && mode === 'f' && calibProgress > 0 && calibMid) {
+    ctx2d.strokeStyle = '#c9b787';
+    ctx2d.lineWidth = 3 * dpr();
+    ctx2d.beginPath();
+    ctx2d.arc(calibMid.x, calibMid.y, 26 * dpr(), -Math.PI / 2, -Math.PI / 2 + calibProgress * Math.PI * 2);
+    ctx2d.stroke();
+    ctx2d.fillStyle = '#c9b787';
+    ctx2d.textAlign = 'center';
+    ctx2d.font = `${14 * dpr()}px serif`;
+    ctx2d.fillText('定琴中…', calibMid.x, calibMid.y - 36 * dpr());
+  }
+  if (now - calibFlashT < 600) {
+    const a = 1 - (now - calibFlashT) / 600;
+    ctx2d.strokeStyle = `rgba(240,226,184,${a * 0.8})`;
+    ctx2d.lineWidth = 2.5 * dpr();
+    ctx2d.strokeRect(qin.xL * W, strings[0].y - qin.dy * H, (qin.xY - qin.xL) * W, strings[6].y - strings[0].y + qin.dy * H * 2);
+  }
+
+  // 指尖:按弦手橙色,拨弦手青色(握拳静默时转灰),捏合(泛音)月白
+  for (const hd of clean ? [] : curHands) {
+    const isPressHand = mode === 'f' && pressHandKey === hd.key;
+    const muted = !isPressHand && (handOpen.get(hd.key) || 0) < 0.8;
+    for (const tip of hd.tips) {
+      ctx2d.fillStyle = isPressHand
+        ? (hd.pinch ? 'rgba(159,216,232,0.95)' : 'rgba(232,160,76,0.95)')
+        : (muted ? 'rgba(160,160,160,0.5)' : 'rgba(120,220,232,0.9)');
+      ctx2d.beginPath(); ctx2d.arc(tip.x, tip.y, 5.5 * dpr(), 0, 7); ctx2d.fill();
+    }
+  }
+
+  const hud = document.getElementById('hud');
+  const track = modelOn && cameraOn;
+  hud.textContent =
+    `${mode === 'f' ? '立面·悬指' : '琴桌·拟真'} ┃ 手部追踪 ${modelOn ? (fps | 0) + ' fps' : '未启用'} ┃ 摄像头 ${cameraOn ? 'On' : 'Off'} ┃ 音频 ${masterReady ? audioCtx.sampleRate + 'Hz' : 'Off'}` +
+    (track ? ` ┃ ${distHint}` : '') +
+    (lastAmp > 0 ? ` ┃ 力度 ${(lastAmp * 100) | 0}%` : '') +
+    (statusNote ? `\n${statusNote}` : '');
+}
+
+function loop(ts) {
+  try { processHands(ts || performance.now()); } catch (e) { /* 单帧失败不中断 */ }
+  draw(performance.now());
+  requestAnimationFrame(loop);
+}
+
+// ---------- 录制(画布+合成音频 → webm/mp4 下载) ----------
+let recorder = null, recChunks = [], recTimerId = null, recStart = 0, recDisplay = null;
+async function toggleRecord() {
+  if (recorder) { recorder.stop(); return; }
+  // 含提示=全界面录制:标签页屏幕捕获(含顶部控件等 DOM),浏览器要求弹一次画面选择;
+  // 取消选择或不支持时退回画布录制。关闭含提示=只录琴面(干净模式),无弹框。
+  let videoTracks = null;
+  recDisplay = null;
+  if (recHintChk.checked && navigator.mediaDevices?.getDisplayMedia) {
+    try {
+      recDisplay = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: false,
+        preferCurrentTab: true,
+        selfBrowserSurface: 'include',
+      });
+      videoTracks = recDisplay.getVideoTracks();
+      // 用户点浏览器自带的「停止共享」时,同步收尾录制
+      videoTracks[0].onended = () => { if (recorder) recorder.stop(); };
+    } catch (e) {
+      console.warn('[rec] 屏幕捕获未授权,退回画布录制(不含顶部控件)', e.name);
+    }
+  }
+  if (!videoTracks) videoTracks = canvas.captureStream(30).getVideoTracks();
+  const tracks = [...videoTracks];
+  if (recDest) tracks.push(...recDest.stream.getAudioTracks());
+  // 优先 H.264+AAC 的 MP4(微信/手机通用),浏览器不支持时才退回 webm
+  const mime = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=avc1.640028,mp4a.40.2',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm',
+  ].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  if (!mime.includes('mp4'))
+    statusNote = '⚠ 此浏览器不支持 MP4 录制,已用 webm(微信可能打不开,建议换 Chrome/Edge)';
+  const rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : {});
+  recChunks = [];
+  rec.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+  rec.onstop = () => {
+    const type = rec.mimeType || 'video/webm';
+    const blob = new Blob(recChunks, { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `镜头古琴-${stamp}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
+    a.click();
+    console.log('[rec] 已保存', (blob.size / 1024 / 1024).toFixed(2) + 'MB', type);
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    if (recDisplay) { recDisplay.getTracks().forEach(t => t.stop()); recDisplay = null; }
+    recorder = null;
+    clearInterval(recTimerId);
+    recBtn.textContent = '⏺ 录制';
+    recBtn.classList.remove('rec');
+  };
+  rec.start(250);
+  recorder = rec;
+  recStart = performance.now();
+  recBtn.classList.add('rec');
+  recTimerId = setInterval(() => {
+    const s = ((performance.now() - recStart) / 1000) | 0;
+    recBtn.textContent = `⏹ ${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`;
+  }, 500);
+  console.log('[rec] 开始录制', mime);
+}
+recBtn.addEventListener('click', toggleRecord);
+
+// ---------- 模式切换 ----------
+const TIPS = {
+  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:左右悬指=徽位·捏合=泛音·垂手=散音 ┃ 双手平举静止=定琴 ┃ 1–7散音 R录制',
+  h: '右侧亮区:伸指划弦=拨弦·握拳过弦不响 ┃ 左侧:手指停在弦上=按音,滑动=走手音 ┃ 键盘1–7=散音 R=录制',
+};
+function applyMode(m) {
+  mode = m;
+  prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear();
+  pressLine = null; lastPluckedIdx = -1; pressHandKey = null;
+  pluckHandKey = null; roleSwapT = 0;
+  qin = { ...QIN_DEFAULT };          // 切换模式恢复默认琴位,平举定琴可随时重设
+  refreshGeom();
+  setQinLock(false);
+  strings.forEach(s => { s.pressX = null; });
+  document.getElementById('tips').textContent = TIPS[m];
+}
+modeSel.addEventListener('change', () => applyMode(modeSel.value));
+applyMode('f');
+
+const scoreSel = document.getElementById('scoreSel');
+scoreSel.addEventListener('change', () => gameSet(scoreSel.value));
+
+// ---------- 鼠标 / 键盘试音(无摄像头也可) ----------
+function mouseDown(e) {
+  const x = (e.clientX) * dpr(), y = (e.clientY) * dpr();
+  if (mode === 'f') {
+    let best = -1, bd = qin.dy * H * 0.5;
+    for (let i = 0; i < 7; i++) {
+      const d = Math.abs(y - strings[i].y);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return;
+    const fRaw = Math.min(1, Math.max(0.125, hFracAt(x)));
+    if (e.shiftKey) {
+      const k = nearestHuiIdx(fRaw);
+      fPluck(best, 0.7 / 0.75, { pinch: true, k, label: '泛·' + HUI_NAMES[k] + '徽' }, x, null);
+      pressLine = { x: hXOf(HUI[k]), label: '泛·' + HUI_NAMES[k] + '徽', pinch: true };
+    } else {
+      const pr = pressFromFraction(fRaw);
+      fPluck(best, 0.7, { pinch: false, f: pr.f, label: pr.label, x: hXOf(pr.f) }, x, null);
+      pressLine = { x: hXOf(pr.f), label: pr.label, pinch: false };
+    }
+    mousePressUntil = performance.now() + 1500;
+    mouseHold = { string: best };
+  } else {
+    let best = -1, bd = qin.dy * H * 0.5;
+    for (let i = 0; i < 7; i++) {
+      const d = Math.abs(y - strings[i].y);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return;
+    let freq = strings[best].openFreq, opts = { plX: x };
+    if (inFingerZone(x)) {
+      const pr = pressFromFraction(hFracAt(x));
+      freq = strings[best].openFreq / pr.f;
+      opts = { label: pr.label, pressX: hXOf(pr.f), pressF: pr.f, plX: x };
+    }
+    pluck(best, 0.7, freq, opts);
+    lastPluckedIdx = best;
+    mouseHold = { string: best };
+  }
+}
+canvas.addEventListener('mousedown', mouseDown);
+canvas.addEventListener('mousemove', (e) => {
+  if (!mouseHold) return;
+  const i = mouseHold.string;
+  const s = strings[i];
+  if (s.harmonic) return;
+  const x = e.clientX * dpr();
+  if (mode === 'f') {
+    const pr = pressFromFraction(Math.min(1, Math.max(0.125, hFracAt(x))));
+    setStringFreq(i, s.openFreq / pr.f);
+    s.pressX = hXOf(pr.f); s.pressLabel = pr.label;
+    pressLine = { x: hXOf(pr.f), label: pr.label, pinch: false };
+    mousePressUntil = performance.now() + 1500;
+  } else {
+    if (!inFingerZone(x)) return;
+    const pr = pressFromFraction(hFracAt(x));
+    setStringFreq(i, s.openFreq / pr.f);
+    s.pressX = hXOf(pr.f);
+    s.pressLabel = pr.label;
+  }
+});
+window.addEventListener('mouseup', () => { mouseHold = null; });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') { toggleRecord(); return; }
+  if ((e.key === 'n' || e.key === 'N') && game && !game.doneT) {   // 跳过当前谱音
+    game.idx++; game.hint = '';
+    if (game.idx >= game.notes.length) game.doneT = performance.now();
+    return;
+  }
+  const n = parseInt(e.key);
+  if (n >= 1 && n <= 7) { pluck(n - 1, 0.7, strings[n - 1].openFreq, {}); lastPluckedIdx = n - 1; }
+});
+
+// ---------- 启动 ----------
+const ovStatus = document.getElementById('ovStatus');
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  try {
+    ovStatus.textContent = '启动音频引擎…';
+    await initAudio();
+  } catch (e) {
+    ovStatus.textContent = '音频启动失败:' + e.message;
+  }
+  try {
+    ovStatus.textContent = '请求摄像头权限…';
+    await initCamera();
+  } catch (e) {
+    statusNote = '⚠ 摄像头不可用(' + e.name + '),可用鼠标点弦试音';
+  }
+  try {
+    ovStatus.textContent = '加载手部识别模型(约 8MB,首次稍慢)…';
+    await initHands();
+  } catch (e) {
+    statusNote += (statusNote ? ' ┃ ' : '') + '⚠ 模型加载失败(需联网)';
+    console.warn('model load failed', e);
+  }
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('tips').style.display = 'block';
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
