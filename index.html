@@ -59,6 +59,7 @@
 
 <div id="hud"></div>
 <div id="controls">
+  <select id="camSel" style="display:none; max-width:130px" title="切换摄像头(内置/外置/手机)"></select>
   <select id="modeSel">
     <option value="f" selected>立面 · 悬指</option>
     <option value="h">琴桌 · 拟真</option>
@@ -81,6 +82,7 @@
   <label><input type="checkbox" id="tickChk" checked> 徽位提示音</label>
   <label><input type="checkbox" id="octChk"> 高八度</label>
   <label title="若系统认反了左右手(摄像头信号源已预翻转),切换此项"><input type="checkbox" id="mirChk" checked> 镜像</label>
+  <label title="显示手势判定量表与延迟分解(快捷键 D):没响/误响时看这里"><input type="checkbox" id="dbgChk"> 调试</label>
   <button id="lockBtn" title="锁定后双手平举不会重新定琴;点击解锁可重新定琴">🔓 琴位</button>
   <label title="开:录整个页面(含顶部控件与全部提示,浏览器会弹一次画面选择,请选『此标签页』);关:只录琴面并隐去提示,出干净演奏视频,无弹框"><input type="checkbox" id="recHintChk" checked> 含提示</label>
   <button id="recBtn">⏺ 录制</button>
@@ -117,7 +119,11 @@ let mode = 'f';                    // 'f' 立面悬指 | 'h' 琴桌拟真
 let audioCtx = null, stringNodes = [], masterReady = false, recDest = null;
 let landmarker = null, cameraOn = false, modelOn = false;
 let statusNote = '';
-let fps = 0, lastDetectT = 0;
+let lastDetectT = 0;
+let dtScale = 1, lastVideoT = -1;  // 帧率归一:速度按真实摄像头帧距折算(15~60fps 手感一致)
+let wakeLock = null, rvfcStarted = false;
+// 延迟分解仪表(EMA):摄像帧距 / 推理耗时 / 相机管线滞后(rVFC captureTime 可得时)
+const perfM = { frameDt: 33, infer: 0, camLag: 0 };
 let prevTips = new Map();          // 上一帧指尖位置
 let handSpeed = new Map();         // 每只手腕部速度 EMA(定琴静止判定用)
 let handOpen = new Map();          // 每只手"伸指分"(带衰减峰值):握拳≈0,伸指≥1
@@ -145,6 +151,7 @@ const snapChk = document.getElementById('snapChk');
 const octChk = document.getElementById('octChk');
 const tickChk = document.getElementById('tickChk');
 const mirChk = document.getElementById('mirChk');
+const dbgChk = document.getElementById('dbgChk');
 const recBtn = document.getElementById('recBtn');
 const modeSel = document.getElementById('modeSel');
 const lockBtn = document.getElementById('lockBtn');
@@ -325,14 +332,59 @@ function mapPoint(lm) {
 }
 
 // ---------- 摄像头 & 手部模型 ----------
-async function initCamera() {
+async function initCamera(deviceId) {
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  const pick = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' };
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false,
+    video: { ...pick, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
   });
   video.srcObject = stream;
   await video.play();
   cameraOn = true;
+  lastVideoT = -1;
+  // 推理挂到"视频新帧回调":新帧一到立即识别,与渲染解耦(rAF 卡顿不拖累延迟)
+  if (!rvfcStarted && 'requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+    rvfcStarted = true;
+    const onVF = (now, meta) => {
+      try { processHands(now, meta); } catch (e) { /* 单帧失败不中断 */ }
+      video.requestVideoFrameCallback(onVF);
+    };
+    video.requestVideoFrameCallback(onVF);
+  }
 }
+
+// 多摄像头(内置/外置/手机连续互通)→ 下拉切换,记住选择
+const camSel = document.getElementById('camSel');
+async function fillCameraList() {
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    camSel.innerHTML = '';
+    devs.forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `摄像头 ${i + 1}`;
+      camSel.appendChild(o);
+    });
+    camSel.style.display = devs.length > 1 ? '' : 'none';
+    const saved = localStorage.getItem('qin.cam');
+    if (saved && devs.some(d => d.deviceId === saved)) camSel.value = saved;
+  } catch (e) { /* 枚举失败不影响演奏 */ }
+}
+camSel.addEventListener('change', async () => {
+  localStorage.setItem('qin.cam', camSel.value);
+  try {
+    await initCamera(camSel.value);
+    prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear();
+  } catch (e) { statusNote = '⚠ 切换摄像头失败(' + e.name + ')'; }
+});
+
+// 屏幕常亮:手机演奏时不熄屏(不支持则静默跳过)
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) { /* 忽略 */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
 
 async function initHands() {
   const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
@@ -354,7 +406,7 @@ const TIP_IDS = [4, 8, 12, 16, 20];
 function readHands(ts) {
   const t0 = performance.now();
   const res = landmarker.detectForVideo(video, ts);
-  fps = fps * 0.9 + 0.1 * (1000 / Math.max(1, performance.now() - t0 + 16));
+  perfM.infer = perfM.infer * 0.9 + (performance.now() - t0) * 0.1;
 
   curHands = []; curTips = [];
   const labelCount = {};
@@ -370,11 +422,12 @@ function readHands(ts) {
     const handSize = Math.hypot(mx - wx, my - wy) || 1;
     // 捏合带滞回:进入 0.38 / 退出 0.50,防拨弦瞬间手形微动闪断泛音
     const wasPinch = pinchState.get(key) || false;
-    const pinch = Math.hypot(tx8 - tx4, ty8 - ty4) < handSize * (wasPinch ? 0.50 : 0.38);
+    const pinchRatio = Math.hypot(tx8 - tx4, ty8 - ty4) / handSize;
+    const pinch = pinchRatio < (wasPinch ? 0.50 : 0.38);
     pinchState.set(key, pinch);
     // 腕部速度 EMA(以手掌为尺,与距离无关)
     const prevW = prevTips.get(key + ':w');
-    const sp = prevW ? Math.hypot(wx - prevW.x, wy - prevW.y) / handSize : 0;
+    const sp = prevW ? Math.hypot(wx - prevW.x, wy - prevW.y) / handSize * dtScale : 0;
     const ema = (handSpeed.get(key) || 0) * 0.8 + sp * 0.2;
     handSpeed.set(key, ema);
     prevTips.set(key + ':w', { x: wx, y: wy });
@@ -404,7 +457,13 @@ function readHands(ts) {
       return { x, y, id: t, key: key + ':' + t, size: handSize, hand: key };
     });
     curTips.push(...tips);
-    curHands.push({ key, wx, wy, tips, pinch, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize });
+    // 调试量表:本帧指尖最大纵向速度(拨弦判定用的同一口径)
+    let tipVn = 0;
+    for (const tp of tips) {
+      const pv = prevTips.get(tp.key);
+      if (pv) tipVn = Math.max(tipVn, Math.abs(tp.y - pv.y) / handSize * dtScale);
+    }
+    curHands.push({ key, wx, wy, tips, pinch, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
   }
 
   // 距离教练:手掌成像大小 → 提示与摄像头的合适距离
@@ -669,7 +728,7 @@ function playFacade() {
       const prev = prevTips.get(tip.key);
       if (prev && canPluck &&
           tip.x > (qin.xL - 0.02) * W && tip.x < (qin.xY + 0.03) * W) {
-        const vn = Math.abs(tip.y - prev.y) / hd.size;
+        const vn = Math.abs(tip.y - prev.y) / hd.size * dtScale;
         if (vn > 0.055) {
           for (let i = 0; i < 7; i++) {
             const sy = strings[i].y;
@@ -732,7 +791,7 @@ function playHorizontal() {
   for (const tip of curTips) {
     const prev = prevTips.get(tip.key);
     if (prev && inPluckZone(tip.x) && (handOpen.get(tip.hand) || 0) >= 0.8) {
-      const vn = Math.abs(tip.y - prev.y) / tip.size;
+      const vn = Math.abs(tip.y - prev.y) / tip.size * dtScale;
       if (vn > 0.055) {
         for (let i = 0; i < 7; i++) {
           const sy = strings[i].y;
@@ -767,9 +826,17 @@ function playHorizontal() {
   }
 }
 
-function processHands(ts) {
+function processHands(ts, meta) {
   if (!modelOn || !cameraOn || video.readyState < 2) return;
-  if (ts - lastDetectT < 1) return;
+  // 只在摄像头出新帧时推理:省一半算力(手机省电),且速度按真实帧距归一,
+  // 15/30/60fps 摄像头的拨弦手感一致
+  if (video.currentTime === lastVideoT) return;
+  lastVideoT = video.currentTime;
+  const dt = Math.min(100, Math.max(10, ts - lastDetectT));
+  dtScale = 33.3 / dt;
+  perfM.frameDt = perfM.frameDt * 0.9 + dt * 0.1;
+  if (meta && meta.captureTime)   // rVFC 提供采集时间戳时,测真实"相机→JS"管线滞后
+    perfM.camLag = perfM.camLag * 0.9 + Math.max(0, ts - meta.captureTime) * 0.1;
   lastDetectT = ts;
   readHands(ts);
   if (mode === 'f') playFacade(); else playHorizontal();
@@ -1025,6 +1092,62 @@ function drawGame(now) {
   }
 }
 
+// ---------- 调试仪表:手势判定量表 + 延迟分解(没响/误响时看这里) ----------
+function dbgBar(x, y, w, label, val, maxV, thr, pass, fmt) {
+  ctx2d.font = `${10 * dpr()}px -apple-system, sans-serif`;
+  ctx2d.textAlign = 'left';
+  ctx2d.fillStyle = '#b8ac8e';
+  ctx2d.fillText(label, x, y + 8 * dpr());
+  const bx = x + 34 * dpr(), bw = w - 92 * dpr(), bh = 8 * dpr();
+  ctx2d.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx2d.fillRect(bx, y, bw, bh);
+  ctx2d.fillStyle = pass ? '#78e896' : '#8a8a8a';
+  ctx2d.fillRect(bx, y, bw * Math.min(1, val / maxV), bh);
+  const tx = bx + bw * Math.min(1, thr / maxV);   // 阈值刻度
+  ctx2d.strokeStyle = '#e8c04c';
+  ctx2d.lineWidth = 1.5 * dpr();
+  ctx2d.beginPath(); ctx2d.moveTo(tx, y - 2 * dpr()); ctx2d.lineTo(tx, y + bh + 2 * dpr()); ctx2d.stroke();
+  ctx2d.fillStyle = pass ? '#78e896' : '#9a8f74';
+  ctx2d.fillText(fmt(val), bx + bw + 6 * dpr(), y + 8 * dpr());
+}
+
+function drawDebug() {
+  if (!dbgChk.checked) return;
+  const x0 = 12 * dpr(), w = 265 * dpr();
+  const audioLat = masterReady ? (audioCtx.baseLatency + (audioCtx.outputLatency || 0)) * 1000 : 0;
+  const camPart = perfM.camLag || perfM.frameDt * 1.5;   // 无 captureTime 时以 1.5 帧距估摄像端
+  const total = camPart + perfM.infer + audioLat;
+  const hh = 46 + curHands.length * 78;
+  const y0 = 92 * dpr();
+  ctx2d.fillStyle = 'rgba(11,14,18,0.78)';
+  ctx2d.beginPath(); ctx2d.roundRect(x0 - 6 * dpr(), y0 - 14 * dpr(), w, hh * dpr()); ctx2d.fill();
+  ctx2d.font = `${10.5 * dpr()}px -apple-system, sans-serif`;
+  ctx2d.textAlign = 'left';
+  ctx2d.fillStyle = '#d8c9a3';
+  ctx2d.fillText(`延迟≈${total | 0}ms:摄像${camPart | 0}${perfM.camLag ? '' : '(估)'} + 推理${perfM.infer.toFixed(1)} + 音频${audioLat | 0}`, x0, y0);
+  ctx2d.fillStyle = '#9a8f74';
+  ctx2d.fillText(`帧距 ${perfM.frameDt.toFixed(0)}ms (${(1000 / perfM.frameDt).toFixed(0)}fps) ┃ 金线=阈值,绿=条件满足`, x0, y0 + 14 * dpr());
+  let y = y0 + 30 * dpr();
+  for (const hd of curHands) {
+    const role = pressHandKey === hd.key ? '按弦手' : (curHands.length >= 2 ? '拨弦手' : '独手·司拨');
+    ctx2d.fillStyle = pressHandKey === hd.key ? '#e8a04c' : '#78dce8';
+    ctx2d.fillText(`${role} ${hd.key}${hd.pinch ? ' ·捏合' : ''}`, x0, y);
+    y += 8 * dpr();
+    dbgBar(x0, y, w, '拨速', hd.tipVn, 0.2, 0.055, hd.tipVn > 0.055, v => v.toFixed(3));
+    y += 15 * dpr();
+    dbgBar(x0, y, w, '开手', handOpen.get(hd.key) || 0, 4, 0.8, (handOpen.get(hd.key) || 0) >= 0.8, v => v.toFixed(1));
+    y += 15 * dpr();
+    dbgBar(x0, y, w, '捏距', hd.pinchRatio, 1.2, 0.38, hd.pinch, v => v.toFixed(2));
+    y += 15 * dpr();
+    dbgBar(x0, y, w, '稳定', hd.speed, 0.1, 0.025, hd.speed < 0.025, v => v.toFixed(3));
+    y += 20 * dpr();
+  }
+  if (!curHands.length) {
+    ctx2d.fillStyle = '#9a8f74';
+    ctx2d.fillText(cameraOn ? '未见手' : '摄像头未开启', x0, y);
+  }
+}
+
 function draw(now) {
   // 干净录制:「含提示」关闭时,录制期间隐去全部提示层(画面即录制内容)
   const clean = !!recorder && !recHintChk.checked;
@@ -1064,17 +1187,23 @@ function draw(now) {
     }
   }
 
+  if (!clean) drawDebug();
+
   const hud = document.getElementById('hud');
   const track = modelOn && cameraOn;
   hud.textContent =
-    `${mode === 'f' ? '立面·悬指' : '琴桌·拟真'} ┃ 手部追踪 ${modelOn ? (fps | 0) + ' fps' : '未启用'} ┃ 摄像头 ${cameraOn ? 'On' : 'Off'} ┃ 音频 ${masterReady ? audioCtx.sampleRate + 'Hz' : 'Off'}` +
+    `${mode === 'f' ? '立面·悬指' : '琴桌·拟真'} ┃ 手部追踪 ${modelOn ? ((1000 / perfM.frameDt) | 0) + 'fps·' + perfM.infer.toFixed(0) + 'ms' : '未启用'} ┃ 摄像头 ${cameraOn ? 'On' : 'Off'} ┃ 音频 ${masterReady ? audioCtx.sampleRate + 'Hz' : 'Off'}` +
     (track ? ` ┃ ${distHint}` : '') +
     (lastAmp > 0 ? ` ┃ 力度 ${(lastAmp * 100) | 0}%` : '') +
+    (window.innerHeight > window.innerWidth ? ' ┃ 📱建议横屏' : '') +
     (statusNote ? `\n${statusNote}` : '');
 }
 
 function loop(ts) {
-  try { processHands(ts || performance.now()); } catch (e) { /* 单帧失败不中断 */ }
+  // rVFC 可用时推理走新帧回调,这里只兜底旧浏览器
+  if (!rvfcStarted) {
+    try { processHands(ts || performance.now()); } catch (e) { /* 单帧失败不中断 */ }
+  }
   draw(performance.now());
   requestAnimationFrame(loop);
 }
@@ -1208,7 +1337,7 @@ function mouseDown(e) {
   }
 }
 canvas.addEventListener('mousedown', mouseDown);
-canvas.addEventListener('mousemove', (e) => {
+function holdMove(e) {
   if (!mouseHold) return;
   const i = mouseHold.string;
   const s = strings[i];
@@ -1227,10 +1356,24 @@ canvas.addEventListener('mousemove', (e) => {
     s.pressX = hXOf(pr.f);
     s.pressLabel = pr.label;
   }
-});
+}
+canvas.addEventListener('mousemove', holdMove);
 window.addEventListener('mouseup', () => { mouseHold = null; });
+// 触屏(手机/平板):点弦=拨,拖动=走手音
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseDown({ clientX: t.clientX, clientY: t.clientY, shiftKey: false });
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  holdMove({ clientX: t.clientX, clientY: t.clientY });
+}, { passive: false });
+window.addEventListener('touchend', () => { mouseHold = null; });
 window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') { toggleRecord(); return; }
+  if (e.key === 'd' || e.key === 'D') { dbgChk.checked = !dbgChk.checked; return; }
   if ((e.key === 'n' || e.key === 'N') && game && !game.doneT) {   // 跳过当前谱音
     game.idx++; game.hint = '';
     if (game.idx >= game.notes.length) game.doneT = performance.now();
@@ -1253,10 +1396,13 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   }
   try {
     ovStatus.textContent = '请求摄像头权限…';
-    await initCamera();
+    try { await initCamera(localStorage.getItem('qin.cam') || undefined); }
+    catch (e) { await initCamera(); }   // 记住的设备已拔走时退回默认
+    fillCameraList();
   } catch (e) {
-    statusNote = '⚠ 摄像头不可用(' + e.name + '),可用鼠标点弦试音';
+    statusNote = '⚠ 摄像头不可用(' + e.name + '),可用鼠标/触屏点弦试音';
   }
+  keepAwake();
   try {
     ovStatus.textContent = '加载手部识别模型(约 8MB,首次稍慢)…';
     await initHands();
