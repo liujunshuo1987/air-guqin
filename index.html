@@ -1164,6 +1164,30 @@ function drawDebug() {
   }
 }
 
+// ---------- 落款印章:录制水印 ----------
+// 免费版官印「無絃琴」朱印随视频落款;付费去印/自定义雅号印 → 接内购后置 true
+const NO_WATERMARK = false;
+function drawSeal() {
+  if (!recorder || NO_WATERMARK) return;
+  const s = 62 * dpr(), m = 16 * dpr();
+  ctx2d.save();
+  ctx2d.translate(W - m - s / 2, H - m - s / 2);
+  ctx2d.rotate(-0.03);                       // 一点手钤的倾斜
+  ctx2d.fillStyle = 'rgba(178,52,40,0.88)';  // 朱砂
+  ctx2d.beginPath(); ctx2d.roundRect(-s / 2, -s / 2, s, s, 5 * dpr()); ctx2d.fill();
+  ctx2d.strokeStyle = 'rgba(240,230,214,0.5)';
+  ctx2d.lineWidth = 1.4 * dpr();
+  ctx2d.beginPath();
+  ctx2d.roundRect(-s / 2 + 3.5 * dpr(), -s / 2 + 3.5 * dpr(), s - 7 * dpr(), s - 7 * dpr(), 3 * dpr());
+  ctx2d.stroke();
+  ctx2d.fillStyle = '#f0e6d6';
+  ctx2d.textAlign = 'center';
+  const f = s * 0.26;
+  ctx2d.font = `${f}px ${JZ_FONT}`;
+  ['無', '絃', '琴'].forEach((ch, i) => ctx2d.fillText(ch, 0, (i - 1) * s * 0.29 + f * 0.35));
+  ctx2d.restore();
+}
+
 function draw(now) {
   // 干净录制:「含提示」关闭时,录制期间隐去全部提示层(画面即录制内容)
   const clean = !!recorder && !recHintChk.checked;
@@ -1204,6 +1228,7 @@ function draw(now) {
   }
 
   if (!clean) drawDebug();
+  drawSeal();   // 录制落款:干净模式也保留(水印即落款)
 
   const hud = document.getElementById('hud');
   const track = modelOn && cameraOn;
