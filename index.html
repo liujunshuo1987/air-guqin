@@ -36,8 +36,9 @@
   #controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; color: #b8ac8e; }
   #controls select { font-family: inherit; background: #1a1f27; color: #d8c9a3;
     border: 1px solid #6b5a3a; border-radius: 3px; padding: 3px 6px; font-size: 13px; }
-  #recBtn, #lockBtn { font-family: inherit; font-size: 13px; padding: 4px 12px; background: transparent;
+  #recBtn, #lockBtn, #rptBtn { font-family: inherit; font-size: 13px; padding: 4px 12px; background: transparent;
     color: #d8c9a3; border: 1px solid #8a7a55; border-radius: 3px; cursor: pointer; min-width: 74px; }
+  #rptBtn { min-width: 0; }
   #recBtn.rec { color: #ff6b5a; border-color: #ff6b5a; animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: 0.55; } }
   #tips { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 5;
@@ -53,7 +54,7 @@
     #controls { left: 8px; right: 8px; top: auto; bottom: 52px; justify-content: center;
       flex-wrap: wrap; gap: 6px 10px; font-size: 11px; padding: 6px 8px; }
     #controls select { font-size: 11px; padding: 2px 4px; max-width: 108px; }
-    #recBtn, #lockBtn { font-size: 11px; padding: 3px 9px; min-width: 0; }
+    #recBtn, #lockBtn, #rptBtn { font-size: 11px; padding: 3px 9px; min-width: 0; }
     #hud { font-size: 10px; line-height: 1.6; max-width: 94vw; }
     #tips { display: none !important; }   /* 小屏说明并入开屏,弹奏区让位 */
   }
@@ -106,6 +107,7 @@
   <label><input type="checkbox" id="octChk"> 高八度</label>
   <label title="若系统认反了左右手(摄像头信号源已预翻转),切换此项"><input type="checkbox" id="mirChk" checked> 镜像</label>
   <label title="显示手势判定量表与延迟分解(快捷键 D):没响/误响时看这里"><input type="checkbox" id="dbgChk"> 调试</label>
+  <button id="rptBtn" title="弹完过来点一下:近10秒的性能与判定数据汇成文本,直接分享/复制——不必截图">报告</button>
   <button id="lockBtn" title="锁定后双手平举不会重新定琴;点击解锁可重新定琴">🔓 琴位</button>
   <label title="开:录整个页面(含顶部控件与全部提示,浏览器会弹一次画面选择,请选『此标签页』);关:只录琴面并隐去提示,出干净演奏视频,无弹框"><input type="checkbox" id="recHintChk" checked> 含提示</label>
   <button id="recBtn">⏺ 录制</button>
@@ -120,7 +122,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.9.2';
+const APP_VER = 'v0.9.3';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -153,6 +155,7 @@ let wakeLock = null, rvfcStarted = false;
 // 延迟分解仪表(EMA):摄像帧距 / 推理耗时 / 相机管线滞后(rVFC captureTime 可得时)
 const perfM = { frameDt: 33, infer: 0, camLag: 0 };
 let activeDelegate = '—', camRes = '';   // 观测:推理委托(GPU/CPU)与采集分辨率
+let vnPeak = { v: 0, t: 0 };             // 近 10 秒拨速峰值(隔空弹奏时记录,供「报告」引用)
 let prevTips = new Map();          // 上一帧指尖位置
 let handSpeed = new Map();         // 每只手腕部速度 EMA(定琴静止判定用)
 let handOpen = new Map();          // 每只手"伸指分"(带衰减峰值):握拳≈0,伸指≥1
@@ -544,6 +547,8 @@ function readHands(ts) {
       const pv = prevTips.get(tp.key);
       if (pv) tipVn = Math.max(tipVn, Math.abs(tp.y - pv.y) / handSize * dtScale);
     }
+    const nowMs = performance.now();
+    if (tipVn > vnPeak.v || nowMs - vnPeak.t > 10000) vnPeak = { v: tipVn, t: nowMs };
     curHands.push({ key, wx, wy, tips, pinch, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
   }
 
@@ -1414,6 +1419,31 @@ async function toggleRecord() {
   console.log('[rec] 开始录制', mime);
 }
 recBtn.addEventListener('click', toggleRecord);
+
+// ---------- 体检报告:近 10 秒滚动数据汇成文本,分享/复制,免去"走近截图"改变读数 ----------
+function buildReport() {
+  const audioLat = masterReady ? ((audioCtx.baseLatency || 0) + (audioCtx.outputLatency || 0)) * 1000 : 0;
+  const camPart = perfM.camLag || perfM.frameDt * 1.5;
+  return [
+    `無絃琴 ${APP_VER} 体检报告`,
+    `委托 ${activeDelegate} ┃ 采集 ${camRes || '—'} ┃ ${envProbe()}`,
+    `延迟≈${(camPart + perfM.infer + audioLat) | 0}ms = 摄像${camPart | 0}${perfM.camLag ? '' : '(估)'} + 推理${perfM.infer.toFixed(1)} + 音频${audioLat | 0}`,
+    `帧距 ${perfM.frameDt.toFixed(0)}ms (${(1000 / perfM.frameDt).toFixed(0)}fps)`,
+    `近10秒拨速峰值 ${vnPeak.v.toFixed(3)} (阈值 0.055)`,
+    `UA ${navigator.userAgent.slice(0, 90)}`,
+  ].join('\n');
+}
+document.getElementById('rptBtn').addEventListener('click', async () => {
+  const text = buildReport();
+  console.log(text);
+  try {
+    if (navigator.share) { await navigator.share({ text }); return; }
+    throw 0;
+  } catch (e) {
+    try { await navigator.clipboard.writeText(text); statusNote = '📋 报告已复制到剪贴板'; }
+    catch (e2) { statusNote = '报告见控制台'; }
+  }
+});
 
 // ---------- 模式切换 ----------
 const TIPS = {
