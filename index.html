@@ -77,6 +77,7 @@
      (需摄像头与联网加载手部模型;无摄像头可鼠标点弦/拖动,Shift+点=泛音,键盘 1–7 散音)</span></p>
   <button id="startBtn">入 席 抚 琴</button>
   <div id="ovStatus"></div>
+  <div id="ver" style="color:#5a5340; font-size:11px; letter-spacing:1px;"></div>
 </div>
 
 <div id="hud"></div>
@@ -117,6 +118,11 @@
    立面模式:琴面竖立朝人、弦仍横陈;手势从摄像头可测量
    (x/y 位置、平面速度、捏合姿态)第一性推导,不再要求"触弦"
    ============================================================ */
+
+// 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
+const APP_VER = 'v0.9.1';
+document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
+console.log('[无弦琴]', APP_VER);
 
 // ---------- 古琴常量 ----------
 // 正调定弦(仲吕均):一至七弦 C2 D2 F2 G2 A2 C3 D3
@@ -1291,7 +1297,17 @@ function draw(now) {
     }
   }
 
-  if (!clean) drawDebug();
+  // 调试面板独立护甲:面板自身出错只跳过面板,不影响整帧
+  if (!clean) {
+    try { drawDebug(); }
+    catch (e) {
+      if (!drawErrNoted) {
+        drawErrNoted = true;
+        statusNote = '⚠ 调试面板异常:' + String((e && e.message) || e).slice(0, 100);
+        console.error('[debug-panel]', e);
+      }
+    }
+  }
   drawSeal();   // 录制落款:干净模式也保留(水印即落款)
 
   const hud = document.getElementById('hud');
@@ -1301,6 +1317,7 @@ function draw(now) {
     (track ? ` ┃ ${distHint}` : '') +
     (lastAmp > 0 ? ` ┃ 力度 ${(lastAmp * 100) | 0}%` : '') +
     (window.innerHeight > window.innerWidth ? ' ┃ 📱建议横屏' : '') +
+    ` ┃ ${APP_VER}` +
     (statusNote ? `\n${statusNote}` : '');
 }
 
@@ -1534,9 +1551,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   requestAnimationFrame(loop);
 });
 
-// PWA:注册 Service Worker(预缓存应用壳与模型,离线可用;失败静默)
+// PWA:注册 Service Worker(轻量壳预缓存;失败静默)。
+// updateViaCache:none + 主动 update():SW 脚本绕开 HTTP 缓存,新版尽快到位
 if ('serviceWorker' in navigator)
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+    .then((reg) => reg.update().catch(() => {}))
+    .catch(() => {});
 </script>
 </body>
 </html>

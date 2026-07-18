@@ -2,7 +2,7 @@
 // 首次打开只预缓存几百 KB——不与页面自身的模型下载抢带宽/内存(手机首载死机主因);
 // vendor 大文件在页面首次真正请求时由 fetch 处理器写入缓存,之后照样离线可用。
 // 策略:导航请求网络优先(更新即时生效,断网退缓存);静态资源缓存优先
-const CACHE = 'wuxianqin-v2';
+const CACHE = 'wuxianqin-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -31,8 +31,10 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== location.origin) return;   // CDN 兜底等外部请求直连网络
 
   if (e.request.mode === 'navigate') {
+    // no-cache:绕开 HTTP 缓存向服务器再验证(Pages 给 index 设了 10 分钟
+    // max-age,普通刷新会拿到陈旧页面),断网时退缓存
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: 'no-cache' })
         .then((r) => {
           const cp = r.clone();
           caches.open(CACHE).then((c) => c.put('./index.html', cp));
