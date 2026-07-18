@@ -915,6 +915,17 @@ function processHands(ts, meta) {
 // ---------- 渲染 ----------
 const dpr = () => devicePixelRatio;
 
+// 圆角矩形:部分 iOS WebKit 无 ctx.roundRect(曾致开调试面板即黑屏),手工路径兜底
+function rrect(x, y, w, h, r = 0) {
+  if (ctx2d.roundRect) { ctx2d.roundRect(x, y, w, h, r); return; }
+  ctx2d.moveTo(x + r, y);
+  ctx2d.arcTo(x + w, y, x + w, y + h, r);
+  ctx2d.arcTo(x + w, y + h, x, y + h, r);
+  ctx2d.arcTo(x, y + h, x, y, r);
+  ctx2d.arcTo(x, y, x + w, y, r);
+  ctx2d.closePath();
+}
+
 function drawCamera() {
   if (cameraOn && video.readyState >= 2) {
     const vw = video.videoWidth, vh = video.videoHeight;
@@ -1183,13 +1194,13 @@ function dbgBar(x, y, w, label, val, maxV, thr, pass, fmt) {
 function drawDebug() {
   if (!dbgChk.checked) return;
   const x0 = 12 * dpr(), w = 265 * dpr();
-  const audioLat = masterReady ? (audioCtx.baseLatency + (audioCtx.outputLatency || 0)) * 1000 : 0;
+  const audioLat = masterReady ? ((audioCtx.baseLatency || 0) + (audioCtx.outputLatency || 0)) * 1000 : 0;
   const camPart = perfM.camLag || perfM.frameDt * 1.5;   // 无 captureTime 时以 1.5 帧距估摄像端
   const total = camPart + perfM.infer + audioLat;
   const hh = 46 + curHands.length * 78;
   const y0 = 92 * dpr();
   ctx2d.fillStyle = 'rgba(11,14,18,0.78)';
-  ctx2d.beginPath(); ctx2d.roundRect(x0 - 6 * dpr(), y0 - 14 * dpr(), w, hh * dpr()); ctx2d.fill();
+  ctx2d.beginPath(); rrect(x0 - 6 * dpr(), y0 - 14 * dpr(), w, hh * dpr(), 6 * dpr()); ctx2d.fill();
   ctx2d.font = `${10.5 * dpr()}px -apple-system, sans-serif`;
   ctx2d.textAlign = 'left';
   ctx2d.fillStyle = '#d8c9a3';
@@ -1227,11 +1238,11 @@ function drawSeal() {
   ctx2d.translate(W - m - s / 2, H - m - s / 2);
   ctx2d.rotate(-0.03);                       // 一点手钤的倾斜
   ctx2d.fillStyle = 'rgba(178,52,40,0.88)';  // 朱砂
-  ctx2d.beginPath(); ctx2d.roundRect(-s / 2, -s / 2, s, s, 5 * dpr()); ctx2d.fill();
+  ctx2d.beginPath(); rrect(-s / 2, -s / 2, s, s, 5 * dpr()); ctx2d.fill();
   ctx2d.strokeStyle = 'rgba(240,230,214,0.5)';
   ctx2d.lineWidth = 1.4 * dpr();
   ctx2d.beginPath();
-  ctx2d.roundRect(-s / 2 + 3.5 * dpr(), -s / 2 + 3.5 * dpr(), s - 7 * dpr(), s - 7 * dpr(), 3 * dpr());
+  rrect(-s / 2 + 3.5 * dpr(), -s / 2 + 3.5 * dpr(), s - 7 * dpr(), s - 7 * dpr(), 3 * dpr());
   ctx2d.stroke();
   ctx2d.fillStyle = '#f0e6d6';
   ctx2d.textAlign = 'center';
@@ -1293,12 +1304,22 @@ function draw(now) {
     (statusNote ? `\n${statusNote}` : '');
 }
 
+let drawErrNoted = false;
 function loop(ts) {
   // rVFC 可用时推理走新帧回调,这里只兜底旧浏览器
   if (!rvfcStarted) {
     try { processHands(ts || performance.now()); } catch (e) { /* 单帧失败不中断 */ }
   }
-  draw(performance.now());
+  // 渲染护甲:单帧异常绝不允许杀死整条 rAF 链(曾在旧 iOS 上因 roundRect 缺失黑屏)
+  try { draw(performance.now()); }
+  catch (e) {
+    if (!drawErrNoted) {
+      drawErrNoted = true;
+      statusNote = '⚠ 渲染异常:' + String((e && e.message) || e).slice(0, 100);
+      document.getElementById('hud').textContent = statusNote;
+      console.error('[draw]', e);
+    }
+  }
   requestAnimationFrame(loop);
 }
 
