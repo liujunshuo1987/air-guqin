@@ -1,18 +1,14 @@
-// 无弦琴 Service Worker:预缓存应用壳与模型,离线可用
+// 无弦琴 Service Worker:轻量壳预缓存 + 重资源(模型/wasm)用到时缓存
+// 首次打开只预缓存几百 KB——不与页面自身的模型下载抢带宽/内存(手机首载死机主因);
+// vendor 大文件在页面首次真正请求时由 fetch 处理器写入缓存,之后照样离线可用。
 // 策略:导航请求网络优先(更新即时生效,断网退缓存);静态资源缓存优先
-const CACHE = 'wuxianqin-v1';
+const CACHE = 'wuxianqin-v2';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './vendor/mediapipe/vision_bundle.mjs',
-  './vendor/mediapipe/wasm/vision_wasm_internal.js',
-  './vendor/mediapipe/wasm/vision_wasm_internal.wasm',
-  './vendor/mediapipe/wasm/vision_wasm_nosimd_internal.js',
-  './vendor/mediapipe/wasm/vision_wasm_nosimd_internal.wasm',
-  './vendor/mediapipe/hand_landmarker.task',
 ];
 
 self.addEventListener('install', (e) => {

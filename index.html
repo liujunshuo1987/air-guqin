@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0e12">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -44,6 +44,19 @@
     font-size: 13px; color: #8f8468; background: rgba(11,14,18,.55); padding: 6px 14px;
     border-radius: 4px; pointer-events: none; display: none; text-align: center; line-height: 1.7;
     max-width: 92vw; }
+  /* 手机窄屏:控件紧凑化、允许换行,状态与说明缩字 */
+  @media (max-width: 760px) {
+    #overlay h1 { font-size: 26px; letter-spacing: 6px; }
+    #overlay p { font-size: 13px; line-height: 1.75; }
+    #motto { font-size: 12px; }
+    #startBtn { font-size: 17px; padding: 11px 34px; }
+    #controls { left: 8px; right: 8px; top: auto; bottom: 52px; justify-content: center;
+      flex-wrap: wrap; gap: 6px 10px; font-size: 11px; padding: 6px 8px; }
+    #controls select { font-size: 11px; padding: 2px 4px; max-width: 108px; }
+    #recBtn, #lockBtn { font-size: 11px; padding: 3px 9px; min-width: 0; }
+    #hud { font-size: 10px; line-height: 1.6; max-width: 94vw; }
+    #tips { display: none !important; }   /* 小屏说明并入开屏,弹奏区让位 */
+  }
 </style>
 </head>
 <body>
@@ -409,10 +422,16 @@ async function initHands() {
     modelPath = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
   }
   const fileset = await vision.FilesetResolver.forVisionTasks(wasmRoot);
-  landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: modelPath, delegate: 'GPU' },
+  const make = (delegate) => vision.HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: modelPath, delegate },
     runningMode: 'VIDEO', numHands: 2,
   });
+  // 部分手机浏览器(尤其 iOS Safari)GPU 委托会初始化失败甚至挂死 → CPU 兜底
+  try { landmarker = await make('GPU'); }
+  catch (e) {
+    console.warn('[model] GPU 委托失败,改用 CPU', e);
+    landmarker = await make('CPU');
+  }
   modelOn = true;
 }
 
@@ -919,8 +938,11 @@ function drawHorizontal(now, facade, clean) {
     ctx2d.beginPath(); ctx2d.moveTo(x, yTop - pad * 0.5); ctx2d.lineTo(x, yBot + pad * 0.5); ctx2d.stroke();
     ctx2d.fillStyle = '#c9b787';
     ctx2d.beginPath(); ctx2d.arc(x, yTop - pad * 0.62, 3.2 * dpr(), 0, 7); ctx2d.fill();
-    ctx2d.fillStyle = 'rgba(201,183,135,0.75)';
-    ctx2d.fillText(HUI_NAMES[k], x, yTop - pad * 0.95);
+    // 窄屏(手机竖持)只标一/四/七/十/十三徽,避免两端徽名相互挤压
+    if (W > 900 * dpr() || k % 3 === 0) {
+      ctx2d.fillStyle = 'rgba(201,183,135,0.75)';
+      ctx2d.fillText(HUI_NAMES[k], x, yTop - pad * 0.95);
+    }
   }
 
   for (let i = 0; i < 7; i++) {
@@ -1445,7 +1467,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   }
   keepAwake();
   try {
-    ovStatus.textContent = '加载手部识别模型(约 8MB,首次稍慢)…';
+    ovStatus.textContent = '加载手部识别模型(首次约 17MB,手机请耐心稍候)…';
     await initHands();
   } catch (e) {
     statusNote += (statusNote ? ' ┃ ' : '') + '⚠ 模型加载失败(需联网)';
