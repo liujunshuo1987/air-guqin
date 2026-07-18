@@ -408,29 +408,60 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') keepAwake();
 });
 
-async function initHands() {
-  // 模型与 wasm 已本地化(vendor/,离线与上架前提);本地缺失时退回 CDN
-  let vision, wasmRoot, modelPath;
+// 环境自检:模型失败时随错误一起上屏,便于远程定位(SIMD 探针来自 wasm-feature-detect)
+function envProbe() {
+  let simd = false;
   try {
-    vision = await import('./vendor/mediapipe/vision_bundle.mjs');
-    wasmRoot = './vendor/mediapipe/wasm';
-    modelPath = './vendor/mediapipe/hand_landmarker.task';
-  } catch (e) {
-    console.warn('[model] 本地模型加载失败,退回 CDN', e);
-    vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
-    wasmRoot = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
-    modelPath = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-  }
-  const fileset = await vision.FilesetResolver.forVisionTasks(wasmRoot);
-  const make = (delegate) => vision.HandLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: modelPath, delegate },
-    runningMode: 'VIDEO', numHands: 2,
-  });
-  // 部分手机浏览器(尤其 iOS Safari)GPU 委托会初始化失败甚至挂死 → CPU 兜底
-  try { landmarker = await make('GPU'); }
-  catch (e) {
-    console.warn('[model] GPU 委托失败,改用 CPU', e);
-    landmarker = await make('CPU');
+    simd = WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]));
+  } catch (e) { /* 视为不支持 */ }
+  const gl2 = !!document.createElement('canvas').getContext('webgl2');
+  return `SIMD:${simd ? '✓' : '✗'} WebGL2:${gl2 ? '✓' : '✗'}`;
+}
+
+async function initHands() {
+  // 一条源走完整链路(导入→wasm→模型下载→建图),整链失败才换下一条源;
+  // 模型手动下载显进度——区分"在下载"与"卡死",弱网(境内访问 github.io)常在此断流
+  const attempt = async (bundle, wasmRoot, modelPath) => {
+    const vision = await import(bundle);
+    const fileset = await vision.FilesetResolver.forVisionTasks(wasmRoot);
+    const resp = await fetch(modelPath);
+    if (!resp.ok) throw new Error('模型下载 HTTP ' + resp.status);
+    const total = +resp.headers.get('content-length') || 0;
+    let buf;
+    if (resp.body) {
+      const reader = resp.body.getReader();
+      const chunks = []; let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value); got += value.length;
+        ovStatus.textContent = `下载手部模型 ${(got / 1048576).toFixed(1)}${total ? '/' + (total / 1048576).toFixed(1) : ''}MB…`;
+      }
+      buf = new Uint8Array(got); let o = 0;
+      for (const c of chunks) { buf.set(c, o); o += c.length; }
+    } else buf = new Uint8Array(await resp.arrayBuffer());
+    ovStatus.textContent = '初始化识别引擎…';
+    const make = (delegate) => vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetBuffer: buf, delegate },
+      runningMode: 'VIDEO', numHands: 2,
+    });
+    // 部分手机浏览器(尤其 iOS)GPU 委托会初始化失败 → CPU 兜底
+    try { return await make('GPU'); }
+    catch (e) { console.warn('[model] GPU 委托失败,改用 CPU', e); return await make('CPU'); }
+  };
+  try {
+    landmarker = await attempt('./vendor/mediapipe/vision_bundle.mjs',
+      './vendor/mediapipe/wasm', './vendor/mediapipe/hand_landmarker.task');
+  } catch (e1) {
+    console.warn('[model] 本地链路失败,尝试 CDN', e1);
+    ovStatus.textContent = '本地模型失败,尝试备用源…';
+    try {
+      landmarker = await attempt('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14',
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
+        'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task');
+    } catch (e2) {
+      throw new Error(`本地:${(e1 && e1.message) || e1} ┃ 备用:${(e2 && e2.message) || e2}`);
+    }
   }
   modelOn = true;
 }
@@ -1470,7 +1501,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     ovStatus.textContent = '加载手部识别模型(首次约 17MB,手机请耐心稍候)…';
     await initHands();
   } catch (e) {
-    statusNote += (statusNote ? ' ┃ ' : '') + '⚠ 模型加载失败(需联网)';
+    // 错误全文上屏 + 环境自检:远程定位"为什么加载失败"的关键信息
+    statusNote += (statusNote ? ' ┃ ' : '') +
+      '⚠ 模型加载失败:' + String((e && e.message) || e).slice(0, 160) + ' ┃ ' + envProbe();
     console.warn('model load failed', e);
   }
   document.getElementById('overlay').style.display = 'none';
