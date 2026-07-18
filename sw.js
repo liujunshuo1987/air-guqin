@@ -1,6 +1,6 @@
-// 镜头古琴 Service Worker:预缓存应用壳与模型,离线可用
+// 无弦琴 Service Worker:预缓存应用壳与模型,离线可用
 // 策略:导航请求网络优先(更新即时生效,断网退缓存);静态资源缓存优先
-const CACHE = 'air-guqin-v1';
+const CACHE = 'wuxianqin-v1';
 const ASSETS = [
   './',
   './index.html',

@@ -9,8 +9,8 @@
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="镜头古琴">
-<title>镜头古琴 · 赛博演奏原型</title>
+<meta name="apple-mobile-web-app-title" content="无弦琴">
+<title>无弦琴 · 凌空古琴</title>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0b0e12; overflow: hidden;
     font-family: "Songti SC", "STSong", "Noto Serif SC", serif; color: #e8dcc0; }
@@ -20,6 +20,7 @@
     flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 10;
     text-align: center; padding: 24px; }
   #overlay h1 { font-size: 34px; letter-spacing: 8px; margin: 0; color: #d8c9a3; font-weight: 500; }
+  #motto { color: #8a7a55; font-size: 14px; letter-spacing: 3px; margin-top: -6px; }
   #overlay p { max-width: 600px; line-height: 1.9; color: #b8ac8e; font-size: 15px; margin: 0; }
   #startBtn { font-family: inherit; font-size: 20px; letter-spacing: 6px; padding: 14px 46px;
     background: transparent; color: #d8c9a3; border: 1px solid #8a7a55; border-radius: 4px;
@@ -50,7 +51,8 @@
 <video id="cam" playsinline muted autoplay></video>
 
 <div id="overlay">
-  <h1>镜 头 古 琴</h1>
+  <h1>无 弦 琴</h1>
+  <div id="motto">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
   <p>七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
      入席后<b>双手左右平举、静止片刻</b>即「定琴」——琴随身而落,远近大小自适应,<br>
      此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
@@ -98,7 +100,7 @@
 
 <script type="module">
 /* ============================================================
-   镜头古琴 —— 单摄像头 + MediaPipe 手部追踪 + Karplus-Strong 弦合成
+   无弦琴(镜头古琴)—— 单摄像头 + MediaPipe 手部追踪 + Karplus-Strong 弦合成
    立面模式:琴面竖立朝人、弦仍横陈;手势从摄像头可测量
    (x/y 位置、平面速度、捏合姿态)第一性推导,不再要求"触弦"
    ============================================================ */
@@ -1266,7 +1268,7 @@ async function toggleRecord() {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.download = `镜头古琴-${stamp}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
+    a.download = `无弦琴-${stamp}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
     a.click();
     console.log('[rec] 已保存', (blob.size / 1024 / 1024).toFixed(2) + 'MB', type);
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);

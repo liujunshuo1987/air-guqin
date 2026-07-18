@@ -1,7 +1,7 @@
 {
-  "name": "镜头古琴",
-  "short_name": "镜头古琴",
-  "description": "单摄像头空气古琴:手势凌空演奏,减字谱跟谱互动",
+  "name": "无弦琴",
+  "short_name": "无弦琴",
+  "description": "无弦琴·凌空古琴:单摄像头手势演奏,减字谱跟谱互动。但识琴中趣,何劳弦上声。",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
