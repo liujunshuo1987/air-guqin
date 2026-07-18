@@ -8,6 +8,11 @@
 
 ## 快速开始
 
+**在线试奏(手机/电脑通用)**:https://liujunshuo1987.github.io/air-guqin/
+手机浏览器打开后可「添加到主屏幕」当独立 App 使用,建议横屏。
+
+本地运行:
+
 ```bash
 python3 -m http.server 8093
 # Chrome/Edge 打开 http://localhost:8093,点「入席抚琴」,允许摄像头
