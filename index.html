@@ -72,7 +72,8 @@
      此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
      两手以站位分工:<b>靠岳山(右)侧的手司拨弦</b>,另一只司按弦。<br>
      拨弦手<b>伸指划过</b>琴弦即响(下扫=滚拂),力度随手速;<b>握拳移动</b>可跨弦换位而不发声;<br>
-     按弦手<b>左右悬指</b>定徽位,移动=走手音,拇食<b>捏合</b>=泛音,垂手离带=散音。<br>
+     按弦手<b>点指</b>(伸食指、收其余)定徽位,移动=走手音,拇食<b>捏合</b>=泛音;<br>
+     <b>松开手掌</b>悬停或垂手=散音(搭手不改音高),按弦手<b>握拳</b>=煞止余音。<br>
      <span style="color:#7d8a6a">右上角可切「琴桌·拟真」分区布局,可录制 MP4 演奏视频;<br>
      若左右手被认反(部分摄像头信号已预翻转),切换右上角「镜像」即可。<br>
      (需摄像头与联网加载手部模型;无摄像头可鼠标点弦/拖动,Shift+点=泛音,键盘 1–7 散音)</span></p>
@@ -122,7 +123,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.9.3';
+const APP_VER = 'v0.10.0';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -160,6 +161,9 @@ let prevTips = new Map();          // 上一帧指尖位置
 let handSpeed = new Map();         // 每只手腕部速度 EMA(定琴静止判定用)
 let handOpen = new Map();          // 每只手"伸指分"(带衰减峰值):握拳≈0,伸指≥1
 let pinchState = new Map();        // 每只手捏合状态(带滞回,防拨弦瞬间闪断)
+let handPoint = new Map();         // 每只手"点指"状态(食指伸、余指收;带滞回)——按弦的刻意指型
+let pressFistN = 0;                // 按弦手握拳连续帧计数(≥2 触发煞音)
+let fricGain = null;               // 走手音摩擦声增益节点
 let lastPluckedIdx = -1, pressHandKey = null;
 let pluckHandKey = null, roleSwapT = 0;   // 拨弦手(靠岳山侧,带滞回)
 let pressLine = null;              // 立面模式悬指按弦线 {x, label, pinch}
@@ -216,9 +220,12 @@ const WORKLET_SRC = [
 '    this.buf = new Float32Array(this.N);',
 '    this.w = 0; this.delay = sampleRate / 110; this.lp = 0;',
 '    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
+'    this.pos = 0.12; this.combOff = 8;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
+'    this.nh = new Float32Array(4096); this.nhi = 0;',
 '    this.port.onmessage = (e) => {',
 '      if (e.data.type === "pluck") {',
 '        this.amp = e.data.amp; this.snapNext = true;',
+'        this.pos = e.data.pos || 0.12;',
 '        this.exciteLeft = -1;',
 '      }',
 '    };',
@@ -230,7 +237,10 @@ const WORKLET_SRC = [
 '    const fb = Math.exp(Math.log(0.001) / (f * p.t60[0]));',
 '    const bright = p.brightness[0];',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
-'    if (this.exciteLeft === -1) this.exciteLeft = Math.max(64, Math.floor(this.delay));',
+'    if (this.exciteLeft === -1) {',
+'      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
+'      this.combOff = Math.max(1, Math.min(4000, Math.floor(this.pos * this.delay)));',
+'    }',
 '    for (let i = 0; i < out.length; i++) {',
 '      this.delay += (target - this.delay) * 0.0012;',
 '      let rp = this.w - this.delay;',
@@ -239,7 +249,12 @@ const WORKLET_SRC = [
 '      const s = this.buf[i0] * (1 - fr) + this.buf[i1] * fr;',
 '      this.lp += bright * (s - this.lp);',
 '      let v = this.lp * fb;',
-'      if (this.exciteLeft > 0) { v += (Math.random() * 2 - 1) * this.amp; this.exciteLeft--; }',
+'      if (this.exciteLeft > 0) {',   // 激励经拨点梳状滤波:拨点处谐波节点被抑制
+'        const wn = Math.random() * 2 - 1;',
+'        this.nh[this.nhi & 4095] = wn;',
+'        v += (wn - this.nh[(this.nhi - this.combOff) & 4095]) * this.amp * 0.8;',
+'        this.nhi++; this.exciteLeft--;',
+'      }',
 '      this.buf[this.w] = v;',
 '      this.w = (this.w + 1) % this.N;',
 '      out[i] = v;',
@@ -273,6 +288,16 @@ async function initAudio() {
     node.connect(g).connect(shelf);
     return node;
   });
+
+  // 走手音摩擦声:环形噪声 → 带通(指与弦面的沙沙声频段)→ 随滑速开合的增益
+  const fb = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+  const fd = fb.getChannelData(0);
+  for (let i = 0; i < fd.length; i++) fd[i] = Math.random() * 2 - 1;
+  const fricSrc = new AudioBufferSourceNode(audioCtx, { buffer: fb, loop: true });
+  const fricBP = new BiquadFilterNode(audioCtx, { type: 'bandpass', frequency: 2400, Q: 0.8 });
+  fricGain = new GainNode(audioCtx, { gain: 0 });
+  fricSrc.connect(fricBP).connect(fricGain).connect(shelf);
+  fricSrc.start();
   await audioCtx.resume();
   masterReady = true;
 }
@@ -282,6 +307,26 @@ function octMul() { return octChk.checked ? 2 : 1; }
 function setStringFreq(i, freq) {
   strings[i].curFreq = freq;
   if (masterReady) stringNodes[i].parameters.get('frequency').value = freq * octMul();
+}
+
+// 走手音:变调 + 按滑速注入摩擦沙沙声(古琴最具辨识度的声音之一)
+function slideTo(i, freq) {
+  const rel = Math.abs(freq - strings[i].curFreq) / Math.max(1, strings[i].curFreq);
+  setStringFreq(i, freq);
+  if (masterReady && fricGain && rel > 0.001) {
+    const t = audioCtx.currentTime;
+    fricGain.gain.setTargetAtTime(Math.min(0.05, rel * 2.0), t, 0.02);
+    fricGain.gain.setTargetAtTime(0, t + 0.06, 0.08);
+  }
+}
+
+// 煞音(掩/煞):急止余音——按弦手握拳触发,或按 M 键
+function muteAll() {
+  if (masterReady)
+    for (const node of stringNodes) node.parameters.get('t60').value = 0.04;
+  for (const s of strings) { s.pluckAt = -1e9; s.pressX = null; s.pressLabel = ''; }
+  lastPluckedIdx = -1;
+  console.log('[煞音] 余音急止');
 }
 
 // opts: {label, harmonic, t60mul, brightOverride, plyBonus, pressX}
@@ -301,7 +346,12 @@ function pluck(i, amp, freq, opts = {}) {
       (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
     const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
     node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
-    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55 });
+    // 拨点比例:拨点距岳山 / 振动段全长(岳山→按点或龙龈),决定激励的梳状谱形
+    const stopX = opts.pressX ?? (qin.xL * W);
+    const pos = opts.plX != null
+      ? Math.min(0.5, Math.max(0.05, (qin.xY * W - opts.plX) / Math.max(1, qin.xY * W - stopX)))
+      : 0.12;
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos });
   }
   if (!opts.noJudge) judgeNote(i, opts);
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
@@ -523,11 +573,13 @@ function readHands(ts) {
     // 全部收拢折回掌心 = 拳 = 离弦静默(替代真琴丢失的 z 轴抬手)
     const normHand = Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1;
     let ext = 0;
+    const fex = [];   // 食/中/名/小 各指是否处于"触弦态"
     for (const [p, t] of [[6, 8], [10, 12], [14, 16], [18, 20]]) {
       const [px, py] = mapPoint(lms[p]);
       const [tx, ty] = mapPoint(lms[t]);
       const radial = Math.hypot(tx - wx, ty - wy) > Math.hypot(px - wx, py - wy);
       const zFwd = (lms[t].z - lms[p].z) < -0.3 * normHand;
+      fex.push(radial || zFwd);
       if (radial || zFwd) ext++;
     }
     // 拇指单独判(托/擘指型:四指收拢、拇指外伸,同样是"触弦态")
@@ -535,6 +587,11 @@ function readHands(ts) {
     if (Math.hypot(tx4 - ix5, ty4 - iy5) > handSize * 0.55) ext++;
     const openScore = Math.max(ext, (handOpen.get(key) || 0) * 0.85);
     handOpen.set(key, openScore);
+    // 点指(按弦的刻意指型):食指伸、中名小基本收拢;带滞回防闪断。
+    // 放松张开的手悬在琴面上不再算按弦——搭手不改音高,如真琴
+    const others = (fex[1] ? 1 : 0) + (fex[2] ? 1 : 0) + (fex[3] ? 1 : 0);
+    const point = fex[0] && others <= (handPoint.get(key) ? 2 : 1);
+    handPoint.set(key, point);
 
     const tips = TIP_IDS.map(t => {
       const [x, y] = mapPoint(lms[t]);
@@ -549,7 +606,7 @@ function readHands(ts) {
     }
     const nowMs = performance.now();
     if (tipVn > vnPeak.v || nowMs - vnPeak.t > 10000) vnPeak = { v: tipVn, t: nowMs };
-    curHands.push({ key, wx, wy, tips, pinch, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
+    curHands.push({ key, wx, wy, tips, pinch, point, extRaw: ext, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
   }
 
   // 距离教练:手掌成像大小 → 提示与摄像头的合适距离
@@ -708,11 +765,11 @@ function judgeNote(i, opts) {
   if (i !== exp.s - 1) hint = '应弹 ' + STRING_NAMES[exp.s - 1] + ' 弦';
   else if (exp.t === 's') {
     if (opts.harmonic) hint = '要散音,松开捏合';
-    else if (opts.pressF != null) hint = '要散音,按弦手垂下离带';
+    else if (opts.pressF != null) hint = '要散音:按弦手松开手掌或离带';
     else ok = true;
   } else if (exp.t === 'a') {
     if (opts.harmonic) hint = '要按音,不要捏合';
-    else if (opts.pressF == null) hint = '要按音,悬指到' + HUI_NAMES[exp.h] + '徽';
+    else if (opts.pressF == null) hint = '要按音:点指(伸食指)移到' + HUI_NAMES[exp.h] + '徽';
     else if (Math.abs(opts.pressF - HUI[exp.h]) < 0.035) ok = true;
     else hint = '徽位' + (opts.pressF > HUI[exp.h] ? '偏低,向岳山(右)移' : '偏高,向龙龈(左)移');
   } else {
@@ -781,9 +838,16 @@ function playFacade() {
   }
   pressHandKey = pressH ? pressH.key : null;
 
-  // 2) 按弦手举入弦带才生效,其横坐标 = 徽位;垂手离带 = 散音
+  // 煞音:按弦手握拳(连续两帧确认)→ 急止全部余音
+  if (pressH && pressH.extRaw === 0 && !pressH.pinch) {
+    if (++pressFistN === 2) muteAll();
+  } else pressFistN = 0;
+
+  // 2) 按弦手需"刻意指型"才算按弦:点指(食指伸余指收)=按音,捏合=泛音;
+  //    放松张开的手悬在琴面上不改音高(如真琴搭手不按),垂手离带同为散音
   let pressInfo = null;
-  if (pressH && pressH.idxTipY > bandTop() && pressH.idxTipY < bandBot()
+  if (pressH && (pressH.pinch || pressH.point)
+      && pressH.idxTipY > bandTop() && pressH.idxTipY < bandBot()
       && pressH.idxTipX > qin.xL * W && pressH.idxTipX < (qin.xY + 0.02) * W) {
     const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressH.idxTipX)));
     if (pressH.pinch) {
@@ -834,7 +898,7 @@ function playFacade() {
     const s = strings[lastPluckedIdx];
     if (!s.harmonic && now - s.pluckAt < 9000) {
       const freq = s.openFreq / pressInfo.f;
-      if (Math.abs(freq - s.curFreq) > 0.3) setStringFreq(lastPluckedIdx, freq);
+      if (Math.abs(freq - s.curFreq) > 0.3) slideTo(lastPluckedIdx, freq);
       s.pressX = pressInfo.x; s.pressLabel = pressInfo.label;
     }
   }
@@ -904,7 +968,7 @@ function playHorizontal() {
     if (sounding && pressOn[i]) {
       const pr = pressFromFraction(hFracAt(pressOn[i].x));
       const freq = strings[i].openFreq / pr.f;
-      if (Math.abs(freq - strings[i].curFreq) > 0.3) setStringFreq(i, freq);
+      if (Math.abs(freq - strings[i].curFreq) > 0.3) slideTo(i, freq);
       strings[i].pressX = hXOf(pr.f);
       strings[i].pressLabel = pr.label;
     }
@@ -1231,7 +1295,7 @@ function drawDebug() {
   for (const hd of curHands) {
     const role = pressHandKey === hd.key ? '按弦手' : (curHands.length >= 2 ? '拨弦手' : '独手·司拨');
     ctx2d.fillStyle = pressHandKey === hd.key ? '#e8a04c' : '#78dce8';
-    ctx2d.fillText(`${role} ${hd.key}${hd.pinch ? ' ·捏合' : ''}`, x0, y);
+    ctx2d.fillText(`${role} ${hd.key}${hd.pinch ? ' ·捏合' : ''}${hd.point ? ' ·点指' : ''}${hd.extRaw === 0 ? ' ·拳' : ''}`, x0, y);
     y += 8 * dpr();
     dbgBar(x0, y, w, '拨速', hd.tipVn, 0.2, 0.055, hd.tipVn > 0.055, v => v.toFixed(3));
     y += 15 * dpr();
@@ -1251,9 +1315,20 @@ function drawDebug() {
 // ---------- 落款印章:录制水印 ----------
 // 免费版官印「無絃琴」朱印随视频落款;付费去印/自定义雅号印 → 接内购后置 true
 const NO_WATERMARK = false;
+const sealImg = new Image();
+sealImg.src = 'icons/icon-192.png';
 function drawSeal() {
   if (!recorder || NO_WATERMARK) return;
   const s = 62 * dpr(), m = 16 * dpr();
+  // 品牌 logo(印章上方,圆角裁切)
+  if (sealImg.complete && sealImg.naturalWidth) {
+    const ls = 46 * dpr(), lx = W - m - s / 2 - ls / 2, ly = H - m - s - 10 * dpr() - ls;
+    ctx2d.save();
+    ctx2d.globalAlpha = 0.92;
+    ctx2d.beginPath(); rrect(lx, ly, ls, ls, 10 * dpr()); ctx2d.clip();
+    ctx2d.drawImage(sealImg, lx, ly, ls, ls);
+    ctx2d.restore();
+  }
   ctx2d.save();
   ctx2d.translate(W - m - s / 2, H - m - s / 2);
   ctx2d.rotate(-0.03);                       // 一点手钤的倾斜
@@ -1447,14 +1522,14 @@ document.getElementById('rptBtn').addEventListener('click', async () => {
 
 // ---------- 模式切换 ----------
 const TIPS = {
-  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:左右悬指=徽位·捏合=泛音·垂手=散音 ┃ 双手平举静止=定琴 ┃ 1–7散音 R录制',
+  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=徽位·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ 1–7散音 M煞音 R录制',
   h: '右侧亮区:伸指划弦=拨弦·握拳过弦不响 ┃ 左侧:手指停在弦上=按音,滑动=走手音 ┃ 键盘1–7=散音 R=录制',
 };
 function applyMode(m) {
   mode = m;
-  prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear();
+  prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear(); handPoint.clear();
   pressLine = null; lastPluckedIdx = -1; pressHandKey = null;
-  pluckHandKey = null; roleSwapT = 0;
+  pluckHandKey = null; roleSwapT = 0; pressFistN = 0;
   qin = { ...QIN_DEFAULT };          // 切换模式恢复默认琴位,平举定琴可随时重设
   refreshGeom();
   setQinLock(false);
@@ -1516,14 +1591,14 @@ function holdMove(e) {
   const x = e.clientX * dpr();
   if (mode === 'f') {
     const pr = pressFromFraction(Math.min(1, Math.max(0.125, hFracAt(x))));
-    setStringFreq(i, s.openFreq / pr.f);
+    slideTo(i, s.openFreq / pr.f);
     s.pressX = hXOf(pr.f); s.pressLabel = pr.label;
     pressLine = { x: hXOf(pr.f), label: pr.label, pinch: false };
     mousePressUntil = performance.now() + 1500;
   } else {
     if (!inFingerZone(x)) return;
     const pr = pressFromFraction(hFracAt(x));
-    setStringFreq(i, s.openFreq / pr.f);
+    slideTo(i, s.openFreq / pr.f);
     s.pressX = hXOf(pr.f);
     s.pressLabel = pr.label;
   }
@@ -1545,6 +1620,7 @@ window.addEventListener('touchend', () => { mouseHold = null; });
 window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') { toggleRecord(); return; }
   if (e.key === 'd' || e.key === 'D') { dbgChk.checked = !dbgChk.checked; return; }
+  if (e.key === 'm' || e.key === 'M') { muteAll(); return; }
   if ((e.key === 'n' || e.key === 'N') && game && !game.doneT) {   // 跳过当前谱音
     game.idx++; game.hint = '';
     if (game.idx >= game.notes.length) game.doneT = performance.now();
