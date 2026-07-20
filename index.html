@@ -72,7 +72,8 @@
      此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
      两手以站位分工:<b>靠岳山(右)侧的手司拨弦</b>,另一只司按弦。<br>
      拨弦手<b>伸指划过</b>琴弦即响(下扫=滚拂),力度随手速;<b>握拳移动</b>可跨弦换位而不发声;<br>
-     按弦手<b>点指</b>(伸食指、收其余)定徽位,移动=走手音,拇食<b>捏合</b>=泛音;<br>
+     按弦手<b>点指</b>(伸食指、收其余)按住<b>指下那根弦</b>的徽位,他弦仍是散音;<br>
+     左右移动=走手音,拇食<b>捏合</b>=泛音;<br>
      <b>松开手掌</b>悬停或垂手=散音(搭手不改音高),按弦手<b>握拳</b>=煞止余音。<br>
      <span style="color:#7d8a6a">右上角可切「琴桌·拟真」分区布局,可录制 MP4 演奏视频;<br>
      若左右手被认反(部分摄像头信号已预翻转),切换右上角「镜像」即可。<br>
@@ -123,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.2';
+const APP_VER = 'v0.10.3';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -859,20 +860,26 @@ function playFacade() {
   else if (pressH.point) pressLatch = true;
   let pressInfo = null;
   if (inBand && (pressH.pinch || pressLatch)) {
+    // 按弦只作用于指下那根弦(食指纵向最近的弦),他弦照旧散音——如真琴
+    let si = 0, bd = 1e9;
+    for (let i = 0; i < 7; i++) {
+      const d = Math.abs(pressH.idxTipY - strings[i].y);
+      if (d < bd) { bd = d; si = i; }
+    }
     const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressH.idxTipX)));
     if (pressH.pinch) {
       const k = nearestHuiIdx(fRaw);
-      pressInfo = { pinch: true, k, label: '泛·' + HUI_NAMES[k] + '徽', x: hXOf(HUI[k]) };
+      pressInfo = { pinch: true, k, si, label: '泛·' + HUI_NAMES[k] + '徽', x: hXOf(HUI[k]) };
     } else {
       const pr = pressFromFraction(fRaw);
-      pressInfo = { pinch: false, f: pr.f, label: pr.label, x: hXOf(pr.f) };
+      pressInfo = { pinch: false, f: pr.f, si, label: pr.label, x: hXOf(pr.f) };
       // 盲弹听觉校准:悬指经过徽位时轻响一声
       const kNear = nearestHuiIdx(fRaw);
       if (Math.abs(fRaw - HUI[kNear]) < 0.010) {
         if (kNear !== lastHuiK) { huiTick(); lastHuiK = kNear; }
       } else lastHuiK = -1;
     }
-    pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch };
+    pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch, y: strings[pressInfo.si].y };
   } else {
     lastHuiK = -1;
     if (now > mousePressUntil) pressLine = null;
@@ -903,12 +910,12 @@ function playFacade() {
     }
   }
 
-  // 4) 走手音:按弦手左右移动 → 最近所奏之弦连续变调(泛音除外)
-  if (pressInfo && !pressInfo.pinch && lastPluckedIdx >= 0) {
-    const s = strings[lastPluckedIdx];
+  // 4) 走手音:按弦手左右移动 → 指下那根弦连续变调(泛音除外)
+  if (pressInfo && !pressInfo.pinch) {
+    const s = strings[pressInfo.si];
     if (!s.harmonic && now - s.pluckAt < 9000) {
       const freq = s.openFreq / pressInfo.f;
-      if (Math.abs(freq - s.curFreq) > 0.3) slideTo(lastPluckedIdx, freq);
+      if (Math.abs(freq - s.curFreq) > 0.3) slideTo(pressInfo.si, freq);
       s.pressX = pressInfo.x; s.pressLabel = pressInfo.label;
     }
   }
@@ -918,11 +925,13 @@ function fPluck(i, amp, pressInfo, plX, handKey) {
   const t = (plX - qin.xL * W) / ((qin.xY - qin.xL) * W);
   const plyBonus = (Math.min(1, Math.max(0, t)) - 0.5) * 0.18;  // 近岳山处拨弦更亮
   let freq = strings[i].openFreq, opts = { plyBonus };
-  if (pressInfo && pressInfo.pinch) {
+  // 按/泛只作用于指下那根弦(si);拨其余弦为散音
+  const applies = pressInfo && (pressInfo.si === undefined || pressInfo.si === i);
+  if (applies && pressInfo.pinch) {
     freq = strings[i].openFreq * HARM[pressInfo.k];
     opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.5, brightOverride: 0.22 };
     amp *= 0.75;
-  } else if (pressInfo) {
+  } else if (applies) {
     freq = strings[i].openFreq / pressInfo.f;
     opts.label = pressInfo.label;
     opts.pressX = pressInfo.x;
@@ -1123,6 +1132,11 @@ function drawHorizontal(now, facade, clean) {
     ctx2d.setLineDash([10 * dpr(), 7 * dpr()]);
     ctx2d.beginPath(); ctx2d.moveTo(pressLine.x, yTop - pad * 0.5); ctx2d.lineTo(pressLine.x, yBot + pad * 0.7); ctx2d.stroke();
     ctx2d.setLineDash([]);
+    // 指下目标弦交点:实心环标明"按的是这根弦"(他弦仍散音)
+    if (pressLine.y != null) {
+      ctx2d.lineWidth = 3 * dpr();
+      ctx2d.beginPath(); ctx2d.arc(pressLine.x, pressLine.y, 11 * dpr(), 0, 7); ctx2d.stroke();
+    }
     ctx2d.fillStyle = col;
     ctx2d.textAlign = 'center';
     ctx2d.font = `${13 * dpr()}px serif`;
@@ -1532,7 +1546,7 @@ document.getElementById('rptBtn').addEventListener('click', async () => {
 
 // ---------- 模式切换 ----------
 const TIPS = {
-  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=徽位·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ 1–7散音 M煞音 R录制',
+  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=按指下那根弦的徽位(他弦仍散)·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ 1–7散音 M煞音 R录制',
   h: '右侧亮区:伸指划弦=拨弦·握拳过弦不响 ┃ 左侧:手指停在弦上=按音,滑动=走手音 ┃ 键盘1–7=散音 R=录制',
 };
 function applyMode(m) {
@@ -1565,12 +1579,12 @@ function mouseDown(e) {
     const fRaw = Math.min(1, Math.max(0.125, hFracAt(x)));
     if (e.shiftKey) {
       const k = nearestHuiIdx(fRaw);
-      fPluck(best, 0.7 / 0.75, { pinch: true, k, label: '泛·' + HUI_NAMES[k] + '徽' }, x, null);
-      pressLine = { x: hXOf(HUI[k]), label: '泛·' + HUI_NAMES[k] + '徽', pinch: true };
+      fPluck(best, 0.7 / 0.75, { pinch: true, k, si: best, label: '泛·' + HUI_NAMES[k] + '徽' }, x, null);
+      pressLine = { x: hXOf(HUI[k]), label: '泛·' + HUI_NAMES[k] + '徽', pinch: true, y: strings[best].y };
     } else {
       const pr = pressFromFraction(fRaw);
-      fPluck(best, 0.7, { pinch: false, f: pr.f, label: pr.label, x: hXOf(pr.f) }, x, null);
-      pressLine = { x: hXOf(pr.f), label: pr.label, pinch: false };
+      fPluck(best, 0.7, { pinch: false, f: pr.f, si: best, label: pr.label, x: hXOf(pr.f) }, x, null);
+      pressLine = { x: hXOf(pr.f), label: pr.label, pinch: false, y: strings[best].y };
     }
     mousePressUntil = performance.now() + 1500;
     mouseHold = { string: best };
