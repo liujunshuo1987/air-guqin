@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.3';
+const APP_VER = 'v0.10.4';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -402,8 +402,9 @@ function hFracAt(x) {  // x → 距岳山弦长比
   return ((qin.xY * W) - x) / L;
 }
 function hXOf(f) { return (qin.xY - f * (qin.xY - qin.xL)) * W; }
-// 立面模式:按弦手须举入弦带(上下各留两弦距),垂手离带=散音
-function bandTop() { return strings[0].y - qin.dy * H * 2; }
+// 立面模式:按弦手须举入弦带,垂手离带=散音。
+// 上缘放宽至三弦距(按一弦上冲不掉按);下缘保持两弦距(垂手释放要干脆)
+function bandTop() { return strings[0].y - qin.dy * H * 3; }
 function bandBot() { return strings[6].y + qin.dy * H * 2; }
 
 // cover-fit:归一化 landmark → 画布坐标(镜像开关同步作用于此与画面绘制)
@@ -591,6 +592,9 @@ function readHands(ts) {
     // 拇指单独判(托/擘指型:四指收拢、拇指外伸,同样是"触弦态")
     const [ix5, iy5] = mapPoint(lms[5]);
     if (Math.hypot(tx4 - ix5, ty4 - iy5) > handSize * 0.55) ext++;
+    // 食指补判:指尖离指根远即算伸——向上指时投影缩短,径向/纵深两判据皆盲区,
+    // 曾致"手指上移触发不敏感"(用户报告);伸直食指无论指向何方,尖-根距皆远
+    if (!fex[0] && Math.hypot(tx8 - ix5, ty8 - iy5) > handSize * 0.7) { fex[0] = true; ext++; }
     const openScore = Math.max(ext, (handOpen.get(key) || 0) * 0.85);
     handOpen.set(key, openScore);
     // 点指(按弦的刻意指型):食指伸、中名小径向收拢,一帧即认;滞回防闪断
