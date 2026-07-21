@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.1';
+const APP_VER = 'v0.11.2';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -149,6 +149,9 @@ const video = document.getElementById('cam');
 let W = 0, H = 0;
 let mode = 'f';                    // 'f' 立面悬指 | 'h' 琴桌拟真
 let audioCtx = null, stringNodes = [], masterReady = false, recDest = null;
+let dryOut = null;                 // 采样直通出口(采样自带琴体声,不再过共鸣链免二次染色)
+let fanSamples = new Array(7).fill(null);   // 每弦七徽泛音采样 {buf, baseFreq, offset, norm}
+const activeFan = new Set();       // 发声中的泛音采样(煞音一并止息)
 let landmarker = null, cameraOn = false, modelOn = false;
 let statusNote = '';
 let lastDetectT = 0;
@@ -280,6 +283,8 @@ async function initAudio() {
   const comp  = new DynamicsCompressorNode(audioCtx, { threshold: -20, ratio: 3, attack: 0.004, release: 0.2 });
   const master = new GainNode(audioCtx, { gain: 0.85 });
   shelf.connect(body1).connect(body2).connect(roll).connect(comp).connect(master).connect(audioCtx.destination);
+  dryOut = master;
+  loadFanSamples();   // 泛音采样后台加载,缺文件自动回退合成
   recDest = audioCtx.createMediaStreamDestination();
   master.connect(recDest);
 
@@ -309,10 +314,59 @@ function slideTo(i, freq) {
   setStringFreq(i, freq);
 }
 
+// ---------- 泛音采样音源层(samples/fan/N.{wav,m4a,mp3} = N 弦七徽泛音) ----------
+// 扔文件即生效:自动去首部静音、峰值归一;其他徽位由七徽样本变速移调;
+// 某弦无采样则回退合成泛音。第三方素材须可商用(CC0/CC-BY,BY 需应用内署名)
+async function loadFanSamples() {
+  for (let i = 0; i < 7; i++) {
+    for (const ext of ['wav', 'm4a', 'mp3']) {
+      try {
+        const r = await fetch(`samples/fan/${i + 1}.${ext}`);
+        if (!r.ok) continue;
+        const buf = await audioCtx.decodeAudioData(await r.arrayBuffer());
+        const d = buf.getChannelData(0);
+        let off = 0, peak = 0;
+        for (let k = 0; k < d.length; k++) {
+          const a = Math.abs(d[k]);
+          if (!off && a > 0.01) off = k;          // 去首部静音
+          if (a > peak) peak = a;
+        }
+        fanSamples[i] = {
+          buf,
+          baseFreq: OPEN_FREQS[i] * 2,            // 录音约定:七徽泛音 = 散音倍频
+          offset: Math.max(0, off - 100) / buf.sampleRate,
+          norm: peak > 0.001 ? 0.9 / peak : 1,
+        };
+        console.log(`[采样] 泛音 弦${STRING_NAMES[i]} ← ${i + 1}.${ext}`);
+        break;
+      } catch (e) { /* 该扩展名不存在或解码失败,试下一个 */ }
+    }
+  }
+}
+
+function playFanSample(i, targetFreq, amp) {
+  const sm = fanSamples[i];
+  const t = audioCtx.currentTime;
+  const src = new AudioBufferSourceNode(audioCtx, {
+    buffer: sm.buf, playbackRate: targetFreq / sm.baseFreq,
+  });
+  const g = new GainNode(audioCtx, { gain: 0 });
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(Math.min(1, amp) * sm.norm, t + 0.004);
+  src.connect(g).connect(dryOut);
+  const entry = { src, g };
+  activeFan.add(entry);
+  src.onended = () => { activeFan.delete(entry); g.disconnect(); };
+  src.start(t, sm.offset);
+}
+
 // 煞音(掩/煞):急止余音——按弦手握拳触发,或按 M 键
 function muteAll() {
-  if (masterReady)
+  if (masterReady) {
     for (const node of stringNodes) node.parameters.get('t60').value = 0.04;
+    const t = audioCtx.currentTime;
+    for (const e of activeFan) { e.g.gain.setTargetAtTime(0, t, 0.03); e.src.stop(t + 0.15); }
+  }
   for (const s of strings) { s.pluckAt = -1e9; s.pressX = null; s.pressLabel = ''; }
   lastPluckedIdx = -1;
   console.log('[煞音] 余音急止');
@@ -331,6 +385,14 @@ function pluck(i, amp, freq, opts = {}) {
   setStringFreq(i, freq);
   if (masterReady) {
     const node = stringNodes[i];
+    if (opts.harmonic && fanSamples[i]) {
+      // 真琴采样优先;轻触节点按灭该弦原有振动(真琴物理),下次拨弦自复位
+      playFanSample(i, freq * octMul(), amp);
+      node.parameters.get('t60').value = 0.12;
+      if (!opts.noJudge) judgeNote(i, opts);
+      console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label}(采样)`);
+      return;
+    }
     node.parameters.get('t60').value =
       (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
     const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
