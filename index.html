@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.7';
+const APP_VER = 'v0.10.8';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -892,7 +892,8 @@ function playFacade() {
       if (prev && !isPress && tip.fs >= 0.5 &&
           tip.x > (qin.xL - 0.02) * W && tip.x < (qin.xY + 0.03) * W) {
         const vn = Math.abs(tip.y - prev.y) / hd.size * dtScale;
-        if (vn > 0.055) {
+        // 泛音模式(捏合中)拨弦阈值放宽:泛音本就轻,弦要"更好拨动"
+        if (vn > (pressInfo && pressInfo.pinch ? 0.04 : 0.055)) {
           for (let i = 0; i < 7; i++) {
             const sy = strings[i].y;
             if ((prev.y - sy) * (tip.y - sy) < 0) {
@@ -924,9 +925,12 @@ function fPluck(i, amp, pressInfo, plX, handKey) {
   // 按/泛只作用于指下那根弦(si);拨其余弦为散音
   const applies = pressInfo && (pressInfo.si === undefined || pressInfo.si === i);
   if (applies && pressInfo.pinch) {
-    freq = strings[i].openFreq * HARM[pressInfo.k];
-    opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.5, brightOverride: 0.22 };
-    amp *= 0.75;
+    // 泛音走"空气琴美学":清脆如钟磬、易发而饱满——亮度高开(高次谐波不闷死,
+    // 一徽 8 倍频也透)、余音清长、按谐波次数补偿音量(越高次激励能量越少)
+    const n = HARM[pressInfo.k];
+    freq = strings[i].openFreq * n;
+    opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.9, brightOverride: 0.75 };
+    amp = Math.min(1, amp * Math.min(1.4, 1.1 + 0.05 * n));
   } else if (applies) {
     freq = strings[i].openFreq / pressInfo.f;
     opts.label = pressInfo.label;
@@ -1574,7 +1578,7 @@ function mouseDown(e) {
     const fRaw = Math.min(1, Math.max(0.125, hFracAt(x)));
     if (e.shiftKey) {
       const k = nearestHuiIdx(fRaw);
-      fPluck(best, 0.7 / 0.75, { pinch: true, k, si: best, label: '泛·' + HUI_NAMES[k] + '徽' }, x, null);
+      fPluck(best, 0.7, { pinch: true, k, si: best, label: '泛·' + HUI_NAMES[k] + '徽' }, x, null);
       pressLine = { x: hXOf(HUI[k]), label: '泛·' + HUI_NAMES[k] + '徽', pinch: true, y: strings[best].y };
     } else {
       const pr = pressFromFraction(fRaw);
