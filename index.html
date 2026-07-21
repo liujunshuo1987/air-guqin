@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.5';
+const APP_VER = 'v0.10.6';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -226,6 +226,7 @@ const WORKLET_SRC = [
 '    this.pos = 0.12; this.combOff = 8;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
 '    this.nh = new Float32Array(4096); this.nhi = 0;',
 '    this.fg = 0.5;',                           // 走手音黏滑颗粒的慢速随机包络
+'    this.fl = 0;',                             // 摩擦噪声的一阶低通状态(去嘶)
 '    this.port.onmessage = (e) => {',
 '      if (e.data.type === "pluck") {',
 '        this.amp = e.data.amp; this.snapNext = true;',
@@ -260,11 +261,13 @@ const WORKLET_SRC = [
 '        v += (wn - this.nh[(this.nhi - this.combOff) & 4095]) * this.amp * 0.8;',
 '        this.nhi++; this.exciteLeft--;',
 '      }',
-'      if (fric > 0.0001) {',         // 走手音:摩擦激励注入弦环内,经弦体谐振发声,
+'      let fn = 0;',
+'      if (fric > 0.0001) {',         // 走手音摩擦:暗色噪声(一阶低通去嘶)
 '        this.fg += 0.004 * (Math.random() - this.fg);',   // 慢速随机包络=指面黏滑颗粒
-'        v += (Math.random() * 2 - 1) * fric * (0.3 + 1.4 * this.fg);',
+'        this.fl += 0.10 * ((Math.random() * 2 - 1) - this.fl);',
+'        fn = this.fl * fric * (0.5 + 2.0 * this.fg) * 3;',
 '      }',
-'      this.buf[this.w] = v;',
+'      this.buf[this.w] = v + fn;',   // 摩擦只写入弦环、不直出:先经弦体循环滤色才被听到
 '      this.w = (this.w + 1) % this.N;',
 '      out[i] = v;',
 '    }',
