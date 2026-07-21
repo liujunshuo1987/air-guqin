@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.6';
+const APP_VER = 'v0.10.7';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -216,7 +216,6 @@ const WORKLET_SRC = [
 '    { name: "frequency", defaultValue: 110, minValue: 30, maxValue: 2500, automationRate: "k-rate" },',
 '    { name: "t60", defaultValue: 5, minValue: 0.05, maxValue: 20, automationRate: "k-rate" },',
 '    { name: "brightness", defaultValue: 0.55, minValue: 0.05, maxValue: 0.95, automationRate: "k-rate" },',
-'    { name: "fric", defaultValue: 0, minValue: 0, maxValue: 0.05, automationRate: "k-rate" },',
 '  ]; }',
 '  constructor() { super();',
 '    this.N = Math.ceil(sampleRate / 28) + 8;',
@@ -225,8 +224,6 @@ const WORKLET_SRC = [
 '    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
 '    this.pos = 0.12; this.combOff = 8;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
 '    this.nh = new Float32Array(4096); this.nhi = 0;',
-'    this.fg = 0.5;',                           // 走手音黏滑颗粒的慢速随机包络
-'    this.fl = 0;',                             // 摩擦噪声的一阶低通状态(去嘶)
 '    this.port.onmessage = (e) => {',
 '      if (e.data.type === "pluck") {',
 '        this.amp = e.data.amp; this.snapNext = true;',
@@ -241,7 +238,6 @@ const WORKLET_SRC = [
 '    const target = Math.max(4, sampleRate / f - 0.5);',
 '    const fb = Math.exp(Math.log(0.001) / (f * p.t60[0]));',
 '    const bright = p.brightness[0];',
-'    const fric = p.fric[0];',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
 '    if (this.exciteLeft === -1) {',
 '      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
@@ -261,13 +257,7 @@ const WORKLET_SRC = [
 '        v += (wn - this.nh[(this.nhi - this.combOff) & 4095]) * this.amp * 0.8;',
 '        this.nhi++; this.exciteLeft--;',
 '      }',
-'      let fn = 0;',
-'      if (fric > 0.0001) {',         // 走手音摩擦:暗色噪声(一阶低通去嘶)
-'        this.fg += 0.004 * (Math.random() - this.fg);',   // 慢速随机包络=指面黏滑颗粒
-'        this.fl += 0.10 * ((Math.random() * 2 - 1) - this.fl);',
-'        fn = this.fl * fric * (0.5 + 2.0 * this.fg) * 3;',
-'      }',
-'      this.buf[this.w] = v + fn;',   // 摩擦只写入弦环、不直出:先经弦体循环滤色才被听到
+'      this.buf[this.w] = v;',
 '      this.w = (this.w + 1) % this.N;',
 '      out[i] = v;',
 '    }',
@@ -301,8 +291,6 @@ async function initAudio() {
     return node;
   });
 
-  // 走手音摩擦声改为注入各弦 KS 环路内部(worklet 的 fric 参数),
-  // 由弦体谐振滤出带音高芯的沙沙声——独立带通噪声直出会像搓纸皮,已废弃
   await audioCtx.resume();
   masterReady = true;
 }
@@ -314,16 +302,10 @@ function setStringFreq(i, freq) {
   if (masterReady) stringNodes[i].parameters.get('frequency').value = freq * octMul();
 }
 
-// 走手音:变调 + 按滑速把摩擦激励注入该弦的谐振环(带音高芯的沙沙,非独立噪声)
+// 走手音 = 纯粹的变调滑移(延迟线内插自然渐变)。摩擦噪声层经三版尝试后
+// 依用户决定移除:空气之琴无指与弦的肉身摩擦,余韵 + 手走音移已是韵味所在
 function slideTo(i, freq) {
-  const rel = Math.abs(freq - strings[i].curFreq) / Math.max(1, strings[i].curFreq);
   setStringFreq(i, freq);
-  if (masterReady && rel > 0.001) {
-    const fp = stringNodes[i].parameters.get('fric');
-    const t = audioCtx.currentTime;
-    fp.setTargetAtTime(Math.min(0.012, rel * 0.5), t, 0.02);
-    fp.setTargetAtTime(0, t + 0.07, 0.1);
-  }
 }
 
 // 煞音(掩/煞):急止余音——按弦手握拳触发,或按 M 键
