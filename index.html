@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.10.8';
+const APP_VER = 'v0.10.9';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -166,6 +166,7 @@ let handPoint = new Map();         // 每只手"点指"状态(食指伸、余指
 let handFinger = new Map();        // 逐指"触弦态"记分(带衰减记忆):合上的指不碰弦,伸着的指才碰弦
 let pressFistN = 0;                // 按弦手握拳连续帧计数(≥2 触发煞音)
 let pressLatch = false;            // 按弦意图闩锁:点指即按,模糊姿态保持,张手/握拳/离带即释
+let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
 let lastPluckedIdx = -1, pressHandKey = null;
 let pluckHandKey = null, roleSwapT = 0;   // 拨弦手(靠岳山侧,带滞回)
 let pressLine = null;              // 立面模式悬指按弦线 {x, label, pinch}
@@ -823,8 +824,14 @@ function playFacade() {
   let pressH = null;
   if (curHands.length >= 2) {
     const pinched = curHands.filter(hd => hd.pinch);
+    const pointed = curHands.filter(hd => hd.point);
     if (pinched.length === 1) {
       pressH = pinched[0];
+      const other = curHands.find(hd => hd.key !== pressH.key);
+      if (other) { pluckHandKey = other.key; roleSwapT = 0; }
+    } else if (pointed.length === 1) {
+      // 点指同捏合一样是明确的按弦宣告,优先于站位
+      pressH = pointed[0];
       const other = curHands.find(hd => hd.key !== pressH.key);
       if (other) { pluckHandKey = other.key; roleSwapT = 0; }
     } else {
@@ -838,7 +845,10 @@ function playFacade() {
       pressH = curHands.find(h => h.key !== pluckHandKey) || null;
     }
   } else if (curHands.length === 1) {
-    pluckHandKey = curHands[0].key; roleSwapT = 0;
+    // 单手:点指/捏合的指型宣告=按弦手(可单手按徽/泛);否则为拨弦手
+    const h = curHands[0];
+    if (h.pinch || h.point) pressH = h;
+    else { pluckHandKey = h.key; roleSwapT = 0; }
   }
   pressHandKey = pressH ? pressH.key : null;
 
@@ -863,6 +873,11 @@ function playFacade() {
       const d = Math.abs(pressH.idxTipY - strings[i].y);
       if (d < bd) { bd = d; si = i; }
     }
+    // 目标弦滞回:指尖悬于两弦正中时不逐帧摇摆——已按之弦有优先权,
+    // 指尖明确移近另一弦(离原弦超 0.65 弦距)才换目标
+    if (lastPressSi >= 0 && lastPressSi !== si
+        && Math.abs(pressH.idxTipY - strings[lastPressSi].y) < qin.dy * H * 0.65) si = lastPressSi;
+    lastPressSi = si;
     const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressH.idxTipX)));
     if (pressH.pinch) {
       const k = nearestHuiIdx(fRaw);
@@ -878,7 +893,7 @@ function playFacade() {
     }
     pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch, y: strings[pressInfo.si].y };
   } else {
-    lastHuiK = -1;
+    lastHuiK = -1; lastPressSi = -1;
     if (now > mousePressUntil) pressLine = null;
   }
 
@@ -1552,7 +1567,7 @@ function applyMode(m) {
   mode = m;
   prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear(); handPoint.clear(); handFinger.clear();
   pressLine = null; lastPluckedIdx = -1; pressHandKey = null;
-  pluckHandKey = null; roleSwapT = 0; pressFistN = 0; pressLatch = false;
+  pluckHandKey = null; roleSwapT = 0; pressFistN = 0; pressLatch = false; lastPressSi = -1;
   qin = { ...QIN_DEFAULT };          // 切换模式恢复默认琴位,平举定琴可随时重设
   refreshGeom();
   setQinLock(false);
