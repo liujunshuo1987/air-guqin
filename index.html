@@ -124,7 +124,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.0';
+const APP_VER = 'v0.11.1';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -149,8 +149,6 @@ const video = document.getElementById('cam');
 let W = 0, H = 0;
 let mode = 'f';                    // 'f' 立面悬指 | 'h' 琴桌拟真
 let audioCtx = null, stringNodes = [], masterReady = false, recDest = null;
-let bodyIn = null;                 // 琴体共鸣链入口(泛音磬体也走此路)
-const activeChimes = new Set();    // 发声中的泛音磬体(煞音时一并止息)
 let landmarker = null, cameraOn = false, modelOn = false;
 let statusNote = '';
 let lastDetectT = 0;
@@ -282,7 +280,6 @@ async function initAudio() {
   const comp  = new DynamicsCompressorNode(audioCtx, { threshold: -20, ratio: 3, attack: 0.004, release: 0.2 });
   const master = new GainNode(audioCtx, { gain: 0.85 });
   shelf.connect(body1).connect(body2).connect(roll).connect(comp).connect(master).connect(audioCtx.destination);
-  bodyIn = shelf;
   recDest = audioCtx.createMediaStreamDestination();
   master.connect(recDest);
 
@@ -312,51 +309,10 @@ function slideTo(i, freq) {
   setStringFreq(i, freq);
 }
 
-// 泛音磬体(金玉之声,第一性推理而非采样):
-//   模态纯净=基音+2/3次分音;双偏振拍频=每分音±0.12%微失谐双振,1~3Hz 光泽波动;
-//   分层衰减=高分音先退、基音悠长;软起音+指离节点的低通轻"啵"
-function harmonicChime(freq, amp) {
-  if (!masterReady || !bodyIn) return;
-  const t = audioCtx.currentTime;
-  const out = new GainNode(audioCtx, { gain: 1 });
-  out.connect(bodyIn);
-  activeChimes.add(out);
-  const partials = [
-    { m: 1, g: 1.0, t60: 5.5 },
-    { m: 2, g: 0.26, t60: 2.2 },
-    { m: 3, g: 0.09, t60: 1.0 },
-  ];
-  for (const p of partials) {
-    for (const det of [-0.0012, 0.0012]) {
-      const o = new OscillatorNode(audioCtx, { type: 'sine', frequency: freq * p.m * (1 + det) });
-      const g = new GainNode(audioCtx, { gain: 0 });
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(amp * p.g * 0.22, t + 0.008);   // 软起音
-      g.gain.setTargetAtTime(0, t + 0.012, p.t60 / 6.91);            // 指数衰减至 -60dB≈t60
-      o.connect(g).connect(out);
-      o.start(t);
-      o.stop(t + p.t60 + 0.5);
-    }
-  }
-  // 指离节点的轻"啵":短促低通噪声
-  const nb = audioCtx.createBuffer(1, 2400, audioCtx.sampleRate);
-  const nd = nb.getChannelData(0);
-  for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * Math.exp(-i / 300);
-  const ns = new AudioBufferSourceNode(audioCtx, { buffer: nb });
-  const nf = new BiquadFilterNode(audioCtx, { type: 'lowpass', frequency: Math.min(3000, freq * 2), Q: 0.5 });
-  const ng = new GainNode(audioCtx, { gain: amp * 0.05 });
-  ns.connect(nf).connect(ng).connect(out);
-  ns.start(t);
-  setTimeout(() => { out.disconnect(); activeChimes.delete(out); }, 7000);
-}
-
 // 煞音(掩/煞):急止余音——按弦手握拳触发,或按 M 键
 function muteAll() {
-  if (masterReady) {
+  if (masterReady)
     for (const node of stringNodes) node.parameters.get('t60').value = 0.04;
-    const t = audioCtx.currentTime;
-    for (const out of activeChimes) out.gain.setTargetAtTime(0, t, 0.03);
-  }
   for (const s of strings) { s.pluckAt = -1e9; s.pressX = null; s.pressLabel = ''; }
   lastPluckedIdx = -1;
   console.log('[煞音] 余音急止');
@@ -375,22 +331,16 @@ function pluck(i, amp, freq, opts = {}) {
   setStringFreq(i, freq);
   if (masterReady) {
     const node = stringNodes[i];
-    if (opts.harmonic) {
-      // 泛音走磬体发声;轻触节点会按灭弦上原有振动(真琴物理),下次拨弦自复位
-      harmonicChime(freq * octMul(), amp);
-      node.parameters.get('t60').value = 0.12;
-    } else {
-      node.parameters.get('t60').value =
-        (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
-      const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
-      node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
-      // 拨点比例:拨点距岳山 / 振动段全长(岳山→按点或龙龈),决定激励的梳状谱形
-      const stopX = opts.pressX ?? (qin.xL * W);
-      const pos = opts.plX != null
-        ? Math.min(0.5, Math.max(0.05, (qin.xY * W - opts.plX) / Math.max(1, qin.xY * W - stopX)))
-        : 0.12;
-      node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos });
-    }
+    node.parameters.get('t60').value =
+      (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
+    const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
+    node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
+    // 拨点比例:拨点距岳山 / 振动段全长(岳山→按点或龙龈),决定激励的梳状谱形
+    const stopX = opts.pressX ?? (qin.xL * W);
+    const pos = opts.plX != null
+      ? Math.min(0.5, Math.max(0.05, (qin.xY * W - opts.plX) / Math.max(1, qin.xY * W - stopX)))
+      : 0.12;
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos });
   }
   if (!opts.noJudge) judgeNote(i, opts);
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
