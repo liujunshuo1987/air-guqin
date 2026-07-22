@@ -135,7 +135,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.3';
+const APP_VER = 'v0.11.4';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -218,11 +218,24 @@ console.log('[无弦琴]', APP_VER);
     settle();
   }, { capture: true });
   vid.addEventListener('ended', () => vid.classList.add('vid-out'));
+  function fallback() {   // 视频起不来:藏之停之,纯弦阵动画开场
+    if (started || done) return;
+    vid.style.display = 'none';
+    try { vid.pause(); } catch (e) { /* 忽略 */ }
+    begin(0);
+  }
+  function tryVideo() {
+    if (started || done) return;
+    vid.play().then(() => begin(2.6)).catch(fallback);
+  }
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) settle();
   else {
-    // 视频能播则先声夺人(弦阵延后 2.6s 于视频渐隐中浮现);起不来则纯动画
-    vid.play().then(() => begin(2.6)).catch(() => { vid.style.display = 'none'; begin(0); });
-    setTimeout(() => { if (!started && !done) { vid.style.display = 'none'; begin(0); } }, 1200);
+    // 视频能播则先声夺人(弦阵延后 2.6s 于视频渐隐中浮现)。
+    // 首访弱网给 3s 耐心窗口,数据一就绪立即接管;超时退纯动画;
+    // 二访起视频已在 SW 预缓存,即点即播
+    tryVideo();
+    vid.addEventListener('loadeddata', tryVideo);
+    setTimeout(fallback, 3000);
   }
 })();
 
