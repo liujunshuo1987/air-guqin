@@ -19,15 +19,13 @@
   #overlay { position: fixed; inset: 0; background: rgba(8,10,14,.92); display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 10;
     text-align: center; padding: 24px; }
-  /* 开场:抚琴视频先入,渐隐中七弦自虚空浮现,文字分层淡入(点击跳过) */
-  #introCv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  /* 开场:抚琴视频铺底 + 暗纱,文字缓缓凸显(点击跳过) */
   #introVid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-    z-index: 0; transition: opacity 1.2s ease; }
-  #introVid.vid-out { opacity: 0; }
-  /* 注意 :not() 参数用元素选择器,若用 #id 会以双 ID 特异性压过 .ov-show */
-  #overlay > *:not(canvas):not(video) { position: relative; z-index: 1; opacity: 0;
-    transform: translateY(12px); transition: opacity .9s ease, transform .9s ease; }
-  #overlay .ov-show { opacity: 1; transform: none; }
+    z-index: 0; }
+  #overlay .scrim { position: absolute; inset: 0; z-index: 0; background: rgba(8,10,14,0.5); }
+  #overlay .ov-item { position: relative; z-index: 1; opacity: 0; transform: translateY(14px);
+    transition: opacity 1.6s ease, transform 1.6s ease; }
+  #overlay .ov-item.ov-show { opacity: 1; transform: none; }
   #overlay h1 { font-size: 34px; letter-spacing: 8px; margin: 0; color: #d8c9a3; font-weight: 500; }
   #motto { color: #8a7a55; font-size: 14px; letter-spacing: 3px; margin-top: -6px; }
   #overlay p { max-width: 600px; line-height: 1.9; color: #b8ac8e; font-size: 15px; margin: 0; }
@@ -74,11 +72,11 @@
 <video id="cam" playsinline muted autoplay></video>
 
 <div id="overlay">
-  <canvas id="introCv"></canvas>
   <video id="introVid" muted playsinline preload="none"></video>
-  <h1>无 弦 琴</h1>
-  <div id="motto">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
-  <p>七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
+  <div class="scrim"></div>
+  <h1 class="ov-item">无 弦 琴</h1>
+  <div id="motto" class="ov-item">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
+  <p class="ov-item">七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
      入席后<b>双手左右平举、静止片刻</b>即「定琴」——琴随身而落,远近大小自适应,<br>
      此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
      两手以站位分工:<b>靠岳山(右)侧的手司拨弦</b>,另一只司按弦。<br>
@@ -89,9 +87,9 @@
      <span style="color:#7d8a6a">右上角可切「琴桌·拟真」分区布局,可录制 MP4 演奏视频;<br>
      若左右手被认反(部分摄像头信号已预翻转),切换右上角「镜像」即可。<br>
      (需摄像头与联网加载手部模型;无摄像头可鼠标点弦/拖动,Shift+点=泛音,键盘 1–7 散音)</span></p>
-  <button id="startBtn">入 席 抚 琴</button>
-  <div id="ovStatus"></div>
-  <div id="ver" style="color:#5a5340; font-size:11px; letter-spacing:1px;"></div>
+  <button id="startBtn" class="ov-item">入 席 抚 琴</button>
+  <div id="ovStatus" class="ov-item"></div>
+  <div id="ver" class="ov-item" style="color:#5a5340; font-size:11px; letter-spacing:1px;"></div>
 </div>
 
 <div id="hud"></div>
@@ -135,7 +133,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.6';
+const APP_VER = 'v0.12.0';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -147,113 +145,58 @@ function setIntroState(s) {
   console.log('[开场]', s);
 }
 
-// ---------- 开场:抚琴视频 → 无中生弦 → 文字入(点击跳过;减少动态直达终态) ----------
+// ---------- 开场:抚琴视频铺底,文字缓缓凸显(点击跳过;减少动态直达终态) ----------
 (function runIntro() {
   const ov = document.getElementById('overlay');
-  const cv = document.getElementById('introCv');
   const vid = document.getElementById('introVid');
-  const ictx = cv.getContext('2d');
-  const parts = ['h1', '#motto', 'p', '#startBtn', '#ver', '#ovStatus']
-    .map(s => ov.querySelector(s)).filter(Boolean);
-  const reveal = [2600, 3100, 3600, 3900, 4100, 4100];
-  let done = false, started = false, off = 0, t0 = 0;
+  const parts = [...ov.querySelectorAll('.ov-item')];
+  const introT0 = performance.now();
+  let started = false, done = false;
 
-  function settle() {   // 终态:全部文字呈现,弦沉为暗金底纹,视频退场
-    done = true;
-    vid.classList.add('vid-out');
-    try { vid.pause(); } catch (e) { /* 忽略 */ }
-    parts.forEach(el => el.classList.add('ov-show'));
-    paint(9);
+  function reveal(delays) {   // 文字按节奏逐层凸显于视频之上
+    started = true;
+    parts.forEach((el, k) => setTimeout(() => el.classList.add('ov-show'), delays[k] || 0));
+    setTimeout(() => { done = true; }, Math.max(...delays) + 200);
   }
-  function paint(t) {   // t 秒:七弦渐次自中央延展;明月淡入;中弦一记无声拨动
-    const W2 = cv.width = (cv.clientWidth || 1) * devicePixelRatio;
-    const H2 = cv.height = (cv.clientHeight || 1) * devicePixelRatio;
-    ictx.clearRect(0, 0, W2, H2);
-    const settleDim = Math.min(1, Math.max(0, (t - 4.2) / 1.2));   // 4.2s 后渐沉
-    for (let i = 0; i < 7; i++) {
-      const born = 0.15 + i * 0.18;
-      const p = Math.min(1, Math.max(0, (t - born) / 0.55));
-      if (p <= 0) continue;
-      const ease = 1 - Math.pow(1 - p, 3);
-      const y = H2 * (0.20 + i * 0.10);
-      const half = ease * 0.42 * W2;
-      const alpha = (0.5 - 0.3 * settleDim) * Math.min(1, p * 2);
-      ictx.strokeStyle = `rgba(201,183,135,${alpha})`;
-      ictx.lineWidth = (2.6 - i * 0.2) * devicePixelRatio;
-      ictx.beginPath();
-      // 中弦(四弦)在 2.2s 被"无形之手"拨动
-      const vib = (i === 3 && t > 2.2) ? Math.exp(-(t - 2.2) * 2.5) * 7 * devicePixelRatio : 0;
-      if (vib > 0.3) {
-        const seg = 30;
-        for (let j = 0; j <= seg; j++) {
-          const x = W2 / 2 - half + (2 * half) * j / seg;
-          const env = Math.sin(Math.PI * j / seg);
-          const yy = y + Math.sin(j * 0.9 + t * 45) * vib * env;
-          j ? ictx.lineTo(x, yy) : ictx.moveTo(x, yy);
-        }
-      } else {
-        ictx.moveTo(W2 / 2 - half, y);
-        ictx.lineTo(W2 / 2 + half, y);
-      }
-      ictx.stroke();
-    }
-    const moon = Math.min(1, Math.max(0, (t - 1.2) / 0.8));
-    if (moon > 0) {
-      ictx.fillStyle = `rgba(232,214,166,${moon * (0.7 - 0.4 * settleDim)})`;
-      ictx.beginPath();
-      ictx.arc(W2 * 0.78, H2 * 0.12, 9 * devicePixelRatio, 0, 7);
-      ictx.fill();
-    }
-  }
-  function frame(now) {
+  function settle() {         // 跳过:全部立现(视频若在播则继续作底,不打断)
     if (done) return;
-    const t = (now - t0) / 1000;
-    paint(t - off);   // off = 视频先行的秒数,弦与文字时间轴整体后移
-    reveal.forEach((ms, k) => { if (now - t0 > ms + off * 1000) parts[k] && parts[k].classList.add('ov-show'); });
-    if (off > 0 && t > off + 0.2 && !vid.classList.contains('vid-out')) vid.classList.add('vid-out');
-    if (t - off < 5.6) requestAnimationFrame(frame);
-    else settle();
+    done = true; started = true;
+    parts.forEach(el => el.classList.add('ov-show'));
   }
-  function begin(o) {
+  function fallback(why) {    // 视频起不来:纯暗幕上出文字
     if (started || done) return;
-    started = true; off = o; t0 = performance.now();
-    requestAnimationFrame(frame);
+    vid.style.display = 'none';
+    try { vid.pause(); } catch (e) { /* 忽略 */ }
+    setIntroState('无视频(' + why + ')');
+    reveal([0, 250, 500, 750, 950, 950]);
   }
-  // 点击跳过(捕获期拦截,避免误触尚未显形的按钮);减少动态直达终态
   ov.addEventListener('click', (e) => {
     if (done) return;
     e.stopPropagation(); e.preventDefault();
     settle();
   }, { capture: true });
-  vid.addEventListener('ended', () => vid.classList.add('vid-out'));
-  const introT0 = performance.now();
-  function fallback(why) {   // 视频起不来:藏之停之,纯弦阵动画开场
-    if (started || done) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
     vid.style.display = 'none';
-    try { vid.pause(); } catch (e) { /* 忽略 */ }
-    setIntroState('弦阵(' + why + ')');
-    begin(0);
+    setIntroState('减少动态');
+    settle();
+    return;
   }
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setIntroState('减少动态'); settle(); }
-  else {
-    // Blob 直喂:页面以普通 200 fetch 取完整视频(SW 缓存可靠),转 Blob URL
-    // 播放——绕开 <video> 的 Range/206 管线。此前缓存以 200 应答 Range 请求,
-    // 部分浏览器视频"在播但黑屏",诊断显示视频(缓存)而用户只见弦阵
-    fetch('intro.mp4')
-      .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
-      .then(b => {
+  // Blob 直喂:普通 200 fetch 取完整视频(SW 缓存可靠)→ Blob URL 播放,
+  // 绕开 <video> 的 Range/206 管线(曾致"在播但黑屏")。视频播完定格末帧作底
+  fetch('intro.mp4')
+    .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
+    .then(b => {
+      if (started || done) return;
+      vid.src = URL.createObjectURL(b);
+      return vid.play().then(() => {
         if (started || done) return;
-        vid.src = URL.createObjectURL(b);
-        return vid.play().then(() => {
-          if (started || done) return;
-          const ms = performance.now() - introT0;
-          setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
-          begin(2.6);
-        });
-      })
-      .catch((e) => fallback('拒:' + ((e && e.name) || e && e.message || e)));
-    setTimeout(() => fallback('超时·网络慢'), 3000);
-  }
+        const ms = performance.now() - introT0;
+        setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
+        reveal([600, 1400, 2200, 3000, 3400, 3400]);
+      });
+    })
+    .catch((e) => fallback('拒:' + ((e && e.name) || (e && e.message) || e)));
+  setTimeout(() => fallback('超时·网络慢'), 3000);
 })();
 
 // 空闲预热:以普通 200 请求把开场视频送进 SW 运行时缓存(<video> 自身的
