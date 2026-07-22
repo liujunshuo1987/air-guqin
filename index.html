@@ -75,7 +75,7 @@
 
 <div id="overlay">
   <canvas id="introCv"></canvas>
-  <video id="introVid" src="intro.mp4" muted playsinline preload="auto"></video>
+  <video id="introVid" muted playsinline preload="none"></video>
   <h1>无 弦 琴</h1>
   <div id="motto">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
   <p>七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
@@ -135,7 +135,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.5';
+const APP_VER = 'v0.11.6';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -234,22 +234,24 @@ function setIntroState(s) {
     setIntroState('弦阵(' + why + ')');
     begin(0);
   }
-  function tryVideo() {
-    if (started || done) return;
-    vid.play().then(() => {
-      if (started || done) return;
-      const ms = performance.now() - introT0;
-      setIntroState('视频(' + (ms < 400 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
-      begin(2.6);
-    }).catch((e) => fallback('拒:' + ((e && e.name) || e)));
-  }
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setIntroState('减少动态'); settle(); }
   else {
-    // 视频能播则先声夺人(弦阵延后 2.6s 于视频渐隐中浮现)。
-    // 首访弱网给 3s 耐心窗口,数据一就绪立即接管;超时退纯动画;
-    // 视频由页面空闲时后台预热入缓存(见下),二访起即点即播
-    tryVideo();
-    vid.addEventListener('loadeddata', tryVideo);
+    // Blob 直喂:页面以普通 200 fetch 取完整视频(SW 缓存可靠),转 Blob URL
+    // 播放——绕开 <video> 的 Range/206 管线。此前缓存以 200 应答 Range 请求,
+    // 部分浏览器视频"在播但黑屏",诊断显示视频(缓存)而用户只见弦阵
+    fetch('intro.mp4')
+      .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
+      .then(b => {
+        if (started || done) return;
+        vid.src = URL.createObjectURL(b);
+        return vid.play().then(() => {
+          if (started || done) return;
+          const ms = performance.now() - introT0;
+          setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
+          begin(2.6);
+        });
+      })
+      .catch((e) => fallback('拒:' + ((e && e.name) || e && e.message || e)));
     setTimeout(() => fallback('超时·网络慢'), 3000);
   }
 })();
