@@ -2,16 +2,16 @@
 // 首次打开只预缓存几百 KB——不与页面自身的模型下载抢带宽/内存(手机首载死机主因);
 // vendor 大文件在页面首次真正请求时由 fetch 处理器写入缓存,之后照样离线可用。
 // 策略:导航请求网络优先(更新即时生效,断网退缓存);静态资源缓存优先
-const CACHE = 'wuxianqin-v4';
+const CACHE = 'wuxianqin-v5';
+// 预缓存只放轻量壳!把大文件放进 addAll 会让整个安装原子失败(弱网下 v4 曾因
+// 1.7MB 视频装不完而反复安装失败)。开场视频由页面空闲时后台 fetch 预热,
+// 经下方运行时缓存存储(普通 200 请求可存;<video> 自身的 206 Range 存不了)
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  // 开场视频必须预缓存:<video> 用 Range 请求(206 响应),Cache API 拒存 206,
-  // 运行时缓存永远存不进——不预缓存则每次访问都从源站拉,弱网必超时回退
-  './intro.mp4',
 ];
 
 self.addEventListener('install', (e) => {

@@ -135,9 +135,17 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.4';
+const APP_VER = 'v0.11.5';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
+
+// 开场决策可观测:版本号旁注明走了哪条路、为何(拍屏即可远程定位)
+let introState = '开场:判定中';
+function setIntroState(s) {
+  introState = '开场:' + s;
+  document.getElementById('ver').textContent = '無絃琴 ' + APP_VER + ' · ' + introState;
+  console.log('[开场]', s);
+}
 
 // ---------- 开场:抚琴视频 → 无中生弦 → 文字入(点击跳过;减少动态直达终态) ----------
 (function runIntro() {
@@ -218,26 +226,37 @@ console.log('[无弦琴]', APP_VER);
     settle();
   }, { capture: true });
   vid.addEventListener('ended', () => vid.classList.add('vid-out'));
-  function fallback() {   // 视频起不来:藏之停之,纯弦阵动画开场
+  const introT0 = performance.now();
+  function fallback(why) {   // 视频起不来:藏之停之,纯弦阵动画开场
     if (started || done) return;
     vid.style.display = 'none';
     try { vid.pause(); } catch (e) { /* 忽略 */ }
+    setIntroState('弦阵(' + why + ')');
     begin(0);
   }
   function tryVideo() {
     if (started || done) return;
-    vid.play().then(() => begin(2.6)).catch(fallback);
+    vid.play().then(() => {
+      if (started || done) return;
+      const ms = performance.now() - introT0;
+      setIntroState('视频(' + (ms < 400 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
+      begin(2.6);
+    }).catch((e) => fallback('拒:' + ((e && e.name) || e)));
   }
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) settle();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setIntroState('减少动态'); settle(); }
   else {
     // 视频能播则先声夺人(弦阵延后 2.6s 于视频渐隐中浮现)。
     // 首访弱网给 3s 耐心窗口,数据一就绪立即接管;超时退纯动画;
-    // 二访起视频已在 SW 预缓存,即点即播
+    // 视频由页面空闲时后台预热入缓存(见下),二访起即点即播
     tryVideo();
     vid.addEventListener('loadeddata', tryVideo);
-    setTimeout(fallback, 3000);
+    setTimeout(() => fallback('超时·网络慢'), 3000);
   }
 })();
+
+// 空闲预热:以普通 200 请求把开场视频送进 SW 运行时缓存(<video> 自身的
+// 206 Range 请求存不进 Cache API)。8s 延迟避开模型下载抢带宽;命中缓存则近零成本
+setTimeout(() => { fetch('intro.mp4').then(r => r.ok && r.blob()).catch(() => {}); }, 8000);
 
 // ---------- 古琴常量 ----------
 // 正调定弦(仲吕均):一至七弦 C2 D2 F2 G2 A2 C3 D3
@@ -1716,6 +1735,7 @@ function buildReport() {
     `延迟≈${(camPart + perfM.infer + audioLat) | 0}ms = 摄像${camPart | 0}${perfM.camLag ? '' : '(估)'} + 推理${perfM.infer.toFixed(1)} + 音频${audioLat | 0}`,
     `帧距 ${perfM.frameDt.toFixed(0)}ms (${(1000 / perfM.frameDt).toFixed(0)}fps)`,
     `近10秒拨速峰值 ${vnPeak.v.toFixed(3)} (阈值 0.055)`,
+    introState,
     `UA ${navigator.userAgent.slice(0, 90)}`,
   ].join('\n');
 }
