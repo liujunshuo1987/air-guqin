@@ -19,6 +19,15 @@
   #overlay { position: fixed; inset: 0; background: rgba(8,10,14,.92); display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 10;
     text-align: center; padding: 24px; }
+  /* 开场:抚琴视频先入,渐隐中七弦自虚空浮现,文字分层淡入(点击跳过) */
+  #introCv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #introVid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    z-index: 0; transition: opacity 1.2s ease; }
+  #introVid.vid-out { opacity: 0; }
+  /* 注意 :not() 参数用元素选择器,若用 #id 会以双 ID 特异性压过 .ov-show */
+  #overlay > *:not(canvas):not(video) { position: relative; z-index: 1; opacity: 0;
+    transform: translateY(12px); transition: opacity .9s ease, transform .9s ease; }
+  #overlay .ov-show { opacity: 1; transform: none; }
   #overlay h1 { font-size: 34px; letter-spacing: 8px; margin: 0; color: #d8c9a3; font-weight: 500; }
   #motto { color: #8a7a55; font-size: 14px; letter-spacing: 3px; margin-top: -6px; }
   #overlay p { max-width: 600px; line-height: 1.9; color: #b8ac8e; font-size: 15px; margin: 0; }
@@ -65,6 +74,8 @@
 <video id="cam" playsinline muted autoplay></video>
 
 <div id="overlay">
+  <canvas id="introCv"></canvas>
+  <video id="introVid" src="intro.mp4" muted playsinline preload="auto"></video>
   <h1>无 弦 琴</h1>
   <div id="motto">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
   <p>七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
@@ -124,9 +135,96 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.11.2';
+const APP_VER = 'v0.11.3';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
+
+// ---------- 开场:抚琴视频 → 无中生弦 → 文字入(点击跳过;减少动态直达终态) ----------
+(function runIntro() {
+  const ov = document.getElementById('overlay');
+  const cv = document.getElementById('introCv');
+  const vid = document.getElementById('introVid');
+  const ictx = cv.getContext('2d');
+  const parts = ['h1', '#motto', 'p', '#startBtn', '#ver', '#ovStatus']
+    .map(s => ov.querySelector(s)).filter(Boolean);
+  const reveal = [2600, 3100, 3600, 3900, 4100, 4100];
+  let done = false, started = false, off = 0, t0 = 0;
+
+  function settle() {   // 终态:全部文字呈现,弦沉为暗金底纹,视频退场
+    done = true;
+    vid.classList.add('vid-out');
+    try { vid.pause(); } catch (e) { /* 忽略 */ }
+    parts.forEach(el => el.classList.add('ov-show'));
+    paint(9);
+  }
+  function paint(t) {   // t 秒:七弦渐次自中央延展;明月淡入;中弦一记无声拨动
+    const W2 = cv.width = (cv.clientWidth || 1) * devicePixelRatio;
+    const H2 = cv.height = (cv.clientHeight || 1) * devicePixelRatio;
+    ictx.clearRect(0, 0, W2, H2);
+    const settleDim = Math.min(1, Math.max(0, (t - 4.2) / 1.2));   // 4.2s 后渐沉
+    for (let i = 0; i < 7; i++) {
+      const born = 0.15 + i * 0.18;
+      const p = Math.min(1, Math.max(0, (t - born) / 0.55));
+      if (p <= 0) continue;
+      const ease = 1 - Math.pow(1 - p, 3);
+      const y = H2 * (0.20 + i * 0.10);
+      const half = ease * 0.42 * W2;
+      const alpha = (0.5 - 0.3 * settleDim) * Math.min(1, p * 2);
+      ictx.strokeStyle = `rgba(201,183,135,${alpha})`;
+      ictx.lineWidth = (2.6 - i * 0.2) * devicePixelRatio;
+      ictx.beginPath();
+      // 中弦(四弦)在 2.2s 被"无形之手"拨动
+      const vib = (i === 3 && t > 2.2) ? Math.exp(-(t - 2.2) * 2.5) * 7 * devicePixelRatio : 0;
+      if (vib > 0.3) {
+        const seg = 30;
+        for (let j = 0; j <= seg; j++) {
+          const x = W2 / 2 - half + (2 * half) * j / seg;
+          const env = Math.sin(Math.PI * j / seg);
+          const yy = y + Math.sin(j * 0.9 + t * 45) * vib * env;
+          j ? ictx.lineTo(x, yy) : ictx.moveTo(x, yy);
+        }
+      } else {
+        ictx.moveTo(W2 / 2 - half, y);
+        ictx.lineTo(W2 / 2 + half, y);
+      }
+      ictx.stroke();
+    }
+    const moon = Math.min(1, Math.max(0, (t - 1.2) / 0.8));
+    if (moon > 0) {
+      ictx.fillStyle = `rgba(232,214,166,${moon * (0.7 - 0.4 * settleDim)})`;
+      ictx.beginPath();
+      ictx.arc(W2 * 0.78, H2 * 0.12, 9 * devicePixelRatio, 0, 7);
+      ictx.fill();
+    }
+  }
+  function frame(now) {
+    if (done) return;
+    const t = (now - t0) / 1000;
+    paint(t - off);   // off = 视频先行的秒数,弦与文字时间轴整体后移
+    reveal.forEach((ms, k) => { if (now - t0 > ms + off * 1000) parts[k] && parts[k].classList.add('ov-show'); });
+    if (off > 0 && t > off + 0.2 && !vid.classList.contains('vid-out')) vid.classList.add('vid-out');
+    if (t - off < 5.6) requestAnimationFrame(frame);
+    else settle();
+  }
+  function begin(o) {
+    if (started || done) return;
+    started = true; off = o; t0 = performance.now();
+    requestAnimationFrame(frame);
+  }
+  // 点击跳过(捕获期拦截,避免误触尚未显形的按钮);减少动态直达终态
+  ov.addEventListener('click', (e) => {
+    if (done) return;
+    e.stopPropagation(); e.preventDefault();
+    settle();
+  }, { capture: true });
+  vid.addEventListener('ended', () => vid.classList.add('vid-out'));
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) settle();
+  else {
+    // 视频能播则先声夺人(弦阵延后 2.6s 于视频渐隐中浮现);起不来则纯动画
+    vid.play().then(() => begin(2.6)).catch(() => { vid.style.display = 'none'; begin(0); });
+    setTimeout(() => { if (!started && !done) { vid.style.display = 'none'; begin(0); } }, 1200);
+  }
+})();
 
 // ---------- 古琴常量 ----------
 // 正调定弦(仲吕均):一至七弦 C2 D2 F2 G2 A2 C3 D3
