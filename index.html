@@ -133,7 +133,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.12.0';
+const APP_VER = 'v0.12.1';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -183,6 +183,22 @@ function setIntroState(s) {
   }
   // Blob 直喂:普通 200 fetch 取完整视频(SW 缓存可靠)→ Blob URL 播放,
   // 绕开 <video> 的 Range/206 管线(曾致"在播但黑屏")。视频播完定格末帧作底
+  // 循环作底:iOS 播完常渲染黑帧而非定格末帧("看不到视频"的常见真相)
+  vid.loop = true;
+  // 像素自检:播放 1.2s 后采样画面亮度上屏——区分"没播/在播但黑/其实在播"
+  function pixelProbe() {
+    try {
+      const pc = document.createElement('canvas');
+      pc.width = 32; pc.height = 32;
+      const px = pc.getContext('2d');
+      px.drawImage(vid, 0, 0, 32, 32);
+      const d = px.getImageData(0, 0, 32, 32).data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+      const avg = sum / (d.length / 4) / 3;
+      setIntroState(introState.slice(3) + (avg < 3 ? '·画面全黑!' : '·亮度' + (avg | 0)));
+    } catch (e) { /* 忽略 */ }
+  }
   fetch('intro.mp4')
     .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
     .then(b => {
@@ -193,6 +209,7 @@ function setIntroState(s) {
         const ms = performance.now() - introT0;
         setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
         reveal([600, 1400, 2200, 3000, 3400, 3400]);
+        setTimeout(pixelProbe, 1200);
       });
     })
     .catch((e) => fallback('拒:' + ((e && e.name) || (e && e.message) || e)));
