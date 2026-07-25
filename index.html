@@ -20,8 +20,11 @@
     flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 10;
     text-align: center; padding: 24px; }
   /* 开场:抚琴视频铺底 + 暗纱,文字缓缓凸显(点击跳过) */
-  #introVid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-    z-index: 0; }
+  /* iOS 视频合成层会"在播但黑屏"(探针可读帧、屏上不显示)——视频缩为 2px
+     纯解码源(display:none 会停解码),画面逐帧绘到 #introBg 画布 */
+  #introVid { position: absolute; left: 0; top: 0; width: 2px; height: 2px;
+    opacity: 0.01; pointer-events: none; }
+  #introBg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
   #overlay .scrim { position: absolute; inset: 0; z-index: 0; background: rgba(8,10,14,0.5); }
   #overlay .ov-item { position: relative; z-index: 1; opacity: 0; transform: translateY(14px);
     transition: opacity 1.6s ease, transform 1.6s ease; }
@@ -72,6 +75,7 @@
 <video id="cam" playsinline muted autoplay></video>
 
 <div id="overlay">
+  <canvas id="introBg"></canvas>
   <video id="introVid" muted playsinline preload="none"></video>
   <div class="scrim"></div>
   <h1 class="ov-item">无 弦 琴</h1>
@@ -133,7 +137,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.12.1';
+const APP_VER = 'v0.12.2';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -210,6 +214,18 @@ function setIntroState(s) {
         setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
         reveal([600, 1400, 2200, 3000, 3400, 3400]);
         setTimeout(pixelProbe, 1200);
+        // 逐帧绘制到铺底画布(绕开 iOS 视频合成层),cover 取景
+        const bg = document.getElementById('introBg');
+        const bctx = bg.getContext('2d');
+        (function blit() {
+          if (ov.style.display === 'none') return;   // 入席后停止
+          const W2 = bg.width = (bg.clientWidth || 1) * devicePixelRatio;
+          const H2 = bg.height = (bg.clientHeight || 1) * devicePixelRatio;
+          const vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
+          const sc = Math.max(W2 / vw, H2 / vh);
+          bctx.drawImage(vid, (W2 - vw * sc) / 2, (H2 - vh * sc) / 2, vw * sc, vh * sc);
+          requestAnimationFrame(blit);
+        })();
       });
     })
     .catch((e) => fallback('拒:' + ((e && e.name) || (e && e.message) || e)));
