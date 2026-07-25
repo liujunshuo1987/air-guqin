@@ -137,7 +137,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.12.2';
+const APP_VER = 'v0.12.3';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -219,6 +219,7 @@ function setIntroState(s) {
         const bctx = bg.getContext('2d');
         (function blit() {
           if (ov.style.display === 'none') return;   // 入席后停止
+          if (vid.currentTime >= 3.0) vid.currentTime = 0;   // 只循环原始前 3 秒,裁去尾段
           const W2 = bg.width = (bg.clientWidth || 1) * devicePixelRatio;
           const H2 = bg.height = (bg.clientHeight || 1) * devicePixelRatio;
           const vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
