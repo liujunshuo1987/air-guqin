@@ -138,7 +138,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.13.2';
+const APP_VER = 'v0.13.3';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -294,7 +294,7 @@ let curTips = [], curHands = [];
 // 定琴 / 距离教练 / 力度显示
 let calibStart = 0, calibProgress = 0, calibMid = null;
 let calibFlashT = -1e9, lastCalibT = -1e9, lastGlobalPluckT = -1e9;
-let lastAmp = 0, lastHuiK = -1, distHint = '';
+let lastAmp = 0, lastHuiK = -1, distHint = '', lastTickT = -1e9;
 let qinLocked = false;             // 琴位锁:锁上后平举静止不再重新定琴
 
 const strings = OPEN_FREQS.map((f) => ({
@@ -1138,10 +1138,15 @@ function playFacade() {
     } else {
       const pr = pressFromFraction(fRaw);
       pressInfo = { pinch: false, f: pr.f, si, label: pr.label, x: hXOf(pr.f) };
-      // 盲弹听觉校准:悬指经过徽位时轻响一声
+      // 盲弹听觉校准:仅在"无声定位"时经过徽位轻响——弦在响(走手音进行中)
+      // 滑音本身即是音高反馈,提示音只会成为嘀嗒噪声(用户反馈);另设 200ms 限速
       const kNear = nearestHuiIdx(fRaw);
       if (Math.abs(fRaw - HUI[kNear]) < 0.010) {
-        if (kNear !== lastHuiK) { huiTick(); lastHuiK = kNear; }
+        if (kNear !== lastHuiK) {
+          const ringing = now - strings[si].pluckAt < 4000;
+          if (!ringing && now - lastTickT > 200) { huiTick(); lastTickT = now; }
+          lastHuiK = kNear;
+        }
       } else lastHuiK = -1;
     }
     pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch, y: strings[pressInfo.si].y };
