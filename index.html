@@ -138,7 +138,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.13.1';
+const APP_VER = 'v0.13.2';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -280,7 +280,8 @@ let handFinger = new Map();        // 逐指"触弦态"记分(带衰减记忆):�
 let pressFistN = 0;                // 按弦手握拳连续帧计数(≥2 触发煞音)
 let pressLatch = false;            // 按弦意图闩锁:点指即按,模糊姿态保持,张手/握拳/离带即释
 const predAt = new Array(7).fill(-1e9);   // 各弦最近预判时刻(与实测穿弦去重)
-let okHoldStart = 0, okHoldP = 0, okHoldPos = null;   // OK 手势(录制开关)保持进度
+let okHoldStart = 0, okHoldP = 0, okHoldPos = null;   // OK 手势(开录)保持进度
+let heartHoldStart = 0, heartHoldP = 0, heartPos = null;   // 双手比心(停录)保持进度
 let recCountEnd = 0, recGestureCoolT = -1e9;          // 3-2-1 倒计时终点 / 手势冷却
 const predBy = new Array(7).fill(null);   // 各弦预判来源 {key, vy}(下一帧校验轨迹,失效即撤)
 let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
@@ -1002,11 +1003,42 @@ function huiTick() {
   o.start(); o.stop(audioCtx.currentTime + 0.04);
 }
 
-// OK 手势(拇食成圈其余张开)保持 0.8s = 录制开关:未录 → 3-2-1 倒计时开录;
-// 录制中 → 即停。双闸防误触:近 1.5s 无拨弦 + 手基本静止;触发后 2.5s 冷却
+// 录制手势分工:单手 OK(拇食成圈余指张开)持 0.8s=3-2-1 开录;
+// 双手比心(两食指尖上聚、两拇指尖下聚)持 0.9s=停录——OK 太近演奏姿态,
+// 停录换双手明确造型(用户定);比心不设"无拨弦"闸(刚弹完即可停)
+function heartPose() {
+  if (curHands.length < 2) return null;
+  const [a, b] = curHands;
+  const s2 = (a.size + b.size) / 2;
+  const ia = a.tips[1], ib = b.tips[1];   // 两手食指尖(心之两瓣相聚)
+  const ta = a.tips[0], tb = b.tips[0];   // 两手拇指尖(心之尖底相聚)
+  if (Math.hypot(ia.x - ib.x, ia.y - ib.y) > s2 * 0.9) return null;
+  if (Math.hypot(ta.x - tb.x, ta.y - tb.y) > s2 * 0.9) return null;
+  if ((ta.y + tb.y) / 2 - (ia.y + ib.y) / 2 < s2 * 0.35) return null;
+  return { x: (ia.x + ib.x + ta.x + tb.x) / 4, y: (ia.y + ib.y + ta.y + tb.y) / 4 };
+}
+
 function trackRecGesture() {
   const now = performance.now();
-  const okHand = curHands.find(h => h.ok && h.speed < 0.05);
+  if (recorder) {                            // 录制中:双手比心 → 停录
+    okHoldStart = 0; okHoldP = 0;
+    const hp = heartPose();
+    if (hp && now - recGestureCoolT > 2500) {
+      if (!heartHoldStart) heartHoldStart = now;
+      heartHoldP = Math.min(1, (now - heartHoldStart) / 900);
+      heartPos = hp;
+      if (heartHoldP >= 1) {
+        heartHoldStart = 0; heartHoldP = 0; recGestureCoolT = now;
+        toggleRecord();
+        beep(660, 0.12, 0.05);
+        setTimeout(() => beep(520, 0.16, 0.05), 140);
+        console.log('[手势] 双手比心 → 停止录制');
+      }
+    } else { heartHoldStart = 0; heartHoldP = 0; }
+    return;
+  }
+  heartHoldStart = 0; heartHoldP = 0;
+  const okHand = curHands.find(h => h.ok && h.speed < 0.05);   // 未录:OK → 3-2-1 开录
   const gateOpen = okHand && now - lastGlobalPluckT > 1500
     && now - recGestureCoolT > 2500 && now >= recCountEnd;
   if (gateOpen) {
@@ -1015,18 +1047,12 @@ function trackRecGesture() {
     okHoldPos = { x: okHand.wx, y: okHand.wy };
     if (okHoldP >= 1) {
       okHoldStart = 0; okHoldP = 0; recGestureCoolT = now;
-      if (recorder) {                        // 停录:即停 + 确认音
-        toggleRecord();
-        beep(660, 0.12, 0.05);
-        console.log('[手势] OK → 停止录制');
-      } else {                               // 开录:3-2-1
-        recCountEnd = now + 3000;
-        beep(880, 0.09, 0.05);
-        setTimeout(() => beep(880, 0.09, 0.05), 1000);
-        setTimeout(() => beep(880, 0.09, 0.05), 2000);
-        setTimeout(() => { beep(1320, 0.22, 0.06); toggleRecord(); }, 3000);
-        console.log('[手势] OK → 3-2-1 开始录制');
-      }
+      recCountEnd = now + 3000;
+      beep(880, 0.09, 0.05);
+      setTimeout(() => beep(880, 0.09, 0.05), 1000);
+      setTimeout(() => beep(880, 0.09, 0.05), 2000);
+      setTimeout(() => { beep(1320, 0.22, 0.06); toggleRecord(); }, 3000);
+      console.log('[手势] OK → 3-2-1 开始录制');
     }
   } else { okHoldStart = 0; okHoldP = 0; }
 }
@@ -1659,6 +1685,19 @@ function draw(now) {
   if (!clean) drawGame(now);
 
   // OK 手势进度环(录制开关)/ 3-2-1 倒计时大字
+  if (!clean && heartHoldP > 0 && heartPos) {
+    ctx2d.strokeStyle = '#f0a0b8';
+    ctx2d.lineWidth = 3 * dpr();
+    ctx2d.beginPath();
+    ctx2d.arc(heartPos.x, heartPos.y, 30 * dpr(), -Math.PI / 2, -Math.PI / 2 + heartHoldP * Math.PI * 2);
+    ctx2d.stroke();
+    ctx2d.fillStyle = '#f0a0b8';
+    ctx2d.textAlign = 'center';
+    ctx2d.font = `${20 * dpr()}px serif`;
+    ctx2d.fillText('♥', heartPos.x, heartPos.y + 7 * dpr());
+    ctx2d.font = `${13 * dpr()}px serif`;
+    ctx2d.fillText('比心…停止录制', heartPos.x, heartPos.y - 40 * dpr());
+  }
   if (!clean && okHoldP > 0 && okHoldPos) {
     ctx2d.strokeStyle = '#78dce8';
     ctx2d.lineWidth = 3 * dpr();
@@ -1847,7 +1886,7 @@ document.getElementById('rptBtn').addEventListener('click', async () => {
 
 // ---------- 模式切换 ----------
 const TIPS = {
-  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=按指下那根弦的徽位(他弦仍散)·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ OK手势持0.8s=321录制/停录 ┃ 1–7散音 M煞音 R录制',
+  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=按指下那根弦的徽位(他弦仍散)·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ OK持0.8s=321开录·双手比心=停录 ┃ 1–7散音 M煞音 R录制',
   h: '右侧亮区:伸指划弦=拨弦·握拳过弦不响 ┃ 左侧:手指停在弦上=按音,滑动=走手音 ┃ 键盘1–7=散音 R=录制',
 };
 function applyMode(m) {
