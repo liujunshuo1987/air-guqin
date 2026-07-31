@@ -138,7 +138,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.13.3';
+const APP_VER = 'v0.13.4';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -1020,41 +1020,32 @@ function heartPose() {
 
 function trackRecGesture() {
   const now = performance.now();
-  if (recorder) {                            // 录制中:双手比心 → 停录
-    okHoldStart = 0; okHoldP = 0;
-    const hp = heartPose();
-    if (hp && now - recGestureCoolT > 2500) {
-      if (!heartHoldStart) heartHoldStart = now;
-      heartHoldP = Math.min(1, (now - heartHoldStart) / 900);
-      heartPos = hp;
-      if (heartHoldP >= 1) {
-        heartHoldStart = 0; heartHoldP = 0; recGestureCoolT = now;
+  const hp = heartPose();
+  // 双手比心统一司录制(用户定,OK 手势退役):未录 → 3-2-1 开录(需近 1.5s
+  // 无拨弦防误触);录制中 → 停录(刚弹完即可比心收束)。保持 0.9s 触发
+  const gate = hp && now - recGestureCoolT > 2500 && now >= recCountEnd
+    && (recorder || now - lastGlobalPluckT > 1500);
+  if (gate) {
+    if (!heartHoldStart) heartHoldStart = now;
+    heartHoldP = Math.min(1, (now - heartHoldStart) / 900);
+    heartPos = hp;
+    if (heartHoldP >= 1) {
+      heartHoldStart = 0; heartHoldP = 0; recGestureCoolT = now;
+      if (recorder) {
         toggleRecord();
         beep(660, 0.12, 0.05);
         setTimeout(() => beep(520, 0.16, 0.05), 140);
         console.log('[手势] 双手比心 → 停止录制');
+      } else {
+        recCountEnd = now + 3000;
+        beep(880, 0.09, 0.05);
+        setTimeout(() => beep(880, 0.09, 0.05), 1000);
+        setTimeout(() => beep(880, 0.09, 0.05), 2000);
+        setTimeout(() => { beep(1320, 0.22, 0.06); toggleRecord(); }, 3000);
+        console.log('[手势] 双手比心 → 3-2-1 开始录制');
       }
-    } else { heartHoldStart = 0; heartHoldP = 0; }
-    return;
-  }
-  heartHoldStart = 0; heartHoldP = 0;
-  const okHand = curHands.find(h => h.ok && h.speed < 0.05);   // 未录:OK → 3-2-1 开录
-  const gateOpen = okHand && now - lastGlobalPluckT > 1500
-    && now - recGestureCoolT > 2500 && now >= recCountEnd;
-  if (gateOpen) {
-    if (!okHoldStart) okHoldStart = now;
-    okHoldP = Math.min(1, (now - okHoldStart) / 800);
-    okHoldPos = { x: okHand.wx, y: okHand.wy };
-    if (okHoldP >= 1) {
-      okHoldStart = 0; okHoldP = 0; recGestureCoolT = now;
-      recCountEnd = now + 3000;
-      beep(880, 0.09, 0.05);
-      setTimeout(() => beep(880, 0.09, 0.05), 1000);
-      setTimeout(() => beep(880, 0.09, 0.05), 2000);
-      setTimeout(() => { beep(1320, 0.22, 0.06); toggleRecord(); }, 3000);
-      console.log('[手势] OK → 3-2-1 开始录制');
     }
-  } else { okHoldStart = 0; okHoldP = 0; }
+  } else { heartHoldStart = 0; heartHoldP = 0; }
 }
 
 function beep(freq, dur, vol) {
@@ -1701,18 +1692,7 @@ function draw(now) {
     ctx2d.font = `${20 * dpr()}px serif`;
     ctx2d.fillText('♥', heartPos.x, heartPos.y + 7 * dpr());
     ctx2d.font = `${13 * dpr()}px serif`;
-    ctx2d.fillText('比心…停止录制', heartPos.x, heartPos.y - 40 * dpr());
-  }
-  if (!clean && okHoldP > 0 && okHoldPos) {
-    ctx2d.strokeStyle = '#78dce8';
-    ctx2d.lineWidth = 3 * dpr();
-    ctx2d.beginPath();
-    ctx2d.arc(okHoldPos.x, okHoldPos.y, 26 * dpr(), -Math.PI / 2, -Math.PI / 2 + okHoldP * Math.PI * 2);
-    ctx2d.stroke();
-    ctx2d.fillStyle = '#78dce8';
-    ctx2d.textAlign = 'center';
-    ctx2d.font = `${13 * dpr()}px serif`;
-    ctx2d.fillText(recorder ? '保持…停止录制' : '保持…开始录制', okHoldPos.x, okHoldPos.y - 36 * dpr());
+    ctx2d.fillText(recorder ? '比心…停止录制' : '比心…3-2-1 开录', heartPos.x, heartPos.y - 40 * dpr());
   }
   if (now < recCountEnd) {
     const n = Math.ceil((recCountEnd - now) / 1000);
@@ -1891,7 +1871,7 @@ document.getElementById('rptBtn').addEventListener('click', async () => {
 
 // ---------- 模式切换 ----------
 const TIPS = {
-  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=按指下那根弦的徽位(他弦仍散)·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ OK持0.8s=321开录·双手比心=停录 ┃ 1–7散音 M煞音 R录制',
+  f: '右侧手司拨弦:伸指划弦=拨(下扫=滚拂)·握拳过弦=换弦不响 ┃ 左侧手司按弦:点指=按指下那根弦的徽位(他弦仍散)·捏合=泛音·张手/垂手=散音·握拳=煞音 ┃ 双手平举静止=定琴 ┃ 双手比心持0.9s=321开录/停录 ┃ 1–7散音 M煞音 R录制',
   h: '右侧亮区:伸指划弦=拨弦·握拳过弦不响 ┃ 左侧:手指停在弦上=按音,滑动=走手音 ┃ 键盘1–7=散音 R=录制',
 };
 function applyMode(m) {
