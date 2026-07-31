@@ -46,7 +46,7 @@
   #controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; color: #b8ac8e; }
   #controls select { font-family: inherit; background: #1a1f27; color: #d8c9a3;
     border: 1px solid #6b5a3a; border-radius: 3px; padding: 3px 6px; font-size: 13px; }
-  #recBtn, #lockBtn, #rptBtn { font-family: inherit; font-size: 13px; padding: 4px 12px; background: transparent;
+  #recBtn, #lockBtn, #rptBtn, #sealBtn { font-family: inherit; font-size: 13px; padding: 4px 12px; background: transparent;
     color: #d8c9a3; border: 1px solid #8a7a55; border-radius: 3px; cursor: pointer; min-width: 74px; }
   #rptBtn { min-width: 0; }
   #recBtn.rec { color: #ff6b5a; border-color: #ff6b5a; animation: pulse 1.2s infinite; }
@@ -64,7 +64,7 @@
     #controls { left: 8px; right: 8px; top: auto; bottom: 52px; justify-content: center;
       flex-wrap: wrap; gap: 6px 10px; font-size: 11px; padding: 6px 8px; }
     #controls select { font-size: 11px; padding: 2px 4px; max-width: 108px; }
-    #recBtn, #lockBtn, #rptBtn { font-size: 11px; padding: 3px 9px; min-width: 0; }
+    #recBtn, #lockBtn, #rptBtn, #sealBtn { font-size: 11px; padding: 3px 9px; min-width: 0; }
     #hud { font-size: 10px; line-height: 1.6; max-width: 94vw; }
     #tips { display: none !important; }   /* 小屏说明并入开屏,弹奏区让位 */
   }
@@ -105,6 +105,7 @@
   </select>
   <select id="scoreSel">
     <option value="" selected>自由弹奏</option>
+    <option value="daily">每日一句 · 试千曲</option>
     <option value="practice">0 入门 · 散按泛</option>
     <option value="xingxing">1 小星星 · 移植</option>
     <option value="laohu">2 两只老虎 · 移植</option>
@@ -124,6 +125,7 @@
   <label title="显示手势判定量表与延迟分解(快捷键 D):没响/误响时看这里"><input type="checkbox" id="dbgChk"> 调试</label>
   <label title="预判拨弦:按指尖轨迹提前定时发声,抵消摄像头与识别延迟,动作-发声更同步;手指急停可能偶发幽灵音,可关闭对比"><input type="checkbox" id="predChk" checked> 预判</label>
   <button id="rptBtn" title="弹完过来点一下:近10秒的性能与判定数据汇成文本,直接分享/复制——不必截图">报告</button>
+  <button id="sealBtn" title="知音专属:刻自己的雅号印,落款于录制视频(留空=不落印)" style="display:none">雅印</button>
   <button id="lockBtn" title="锁定后双手平举不会重新定琴;点击解锁可重新定琴">🔓 琴位</button>
   <label title="开:录整个页面(含顶部控件与全部提示,浏览器会弹一次画面选择,请选『此标签页』);关:只录琴面并隐去提示,出干净演奏视频,无弹框"><input type="checkbox" id="recHintChk" checked> 含提示</label>
   <button id="recBtn">⏺ 录制</button>
@@ -138,15 +140,26 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.13.4';
-document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
-console.log('[无弦琴]', APP_VER);
+const APP_VER = 'v0.14.0';
+
+// ---------- 分层权益(收费脚手架) ----------
+// 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
+// IAP 接入前本地模拟:URL ?tier=zhiyin|free 写入 localStorage;接内购时改此处即可
+{
+  const t = new URLSearchParams(location.search).get('tier');
+  if (t === 'zhiyin' || t === 'free') localStorage.setItem('qin.tier', t);
+}
+const ENT = { get zhiyin() { return localStorage.getItem('qin.tier') === 'zhiyin'; } };
+const sealName = () => (localStorage.getItem('qin.sealName') || '').trim().slice(0, 4);
+const verBase = '無絃琴 ' + APP_VER + (ENT.zhiyin ? ' · 知音' : '');
+document.getElementById('ver').textContent = verBase;
+console.log('[无弦琴]', APP_VER, ENT.zhiyin ? '知音' : '白身');
 
 // 开场决策可观测:版本号旁注明走了哪条路、为何(拍屏即可远程定位)
 let introState = '开场:判定中';
 function setIntroState(s) {
   introState = '开场:' + s;
-  document.getElementById('ver').textContent = '無絃琴 ' + APP_VER + ' · ' + introState;
+  document.getElementById('ver').textContent = verBase + ' · ' + introState;
   console.log('[开场]', s);
 }
 
@@ -850,12 +863,12 @@ const P = (spec, ly) => spec.map(([s, t, h], i) => ({ s, t, h, ly: ly && ly[i] !
 // 曲库:1-2 几乎全散音 → 3 散按对答 → 4-6 多按位 → 7 泛音专项 → 8-10 意临古曲
 // 「移植」=旋律照原曲;「意临」=无法逐音打谱的古曲,取其调式织体气韵的致意改编
 const SCORES = {
-  practice: { name: '入门 · 散按泛', notes: [
+  practice: { free: true, name: '入门 · 散按泛', notes: [
     ...P([[1,'s'],[2,'s'],[3,'s'],[4,'s'],[5,'s'],[6,'s'],[7,'s']]),
     ...P([[4,'a',6],[4,'a',8],[5,'a',6]]),
     ...P([[6,'f',6],[4,'f',6]]),
   ] },
-  xingxing: { name: '小星星 · 移植', notes: [
+  xingxing: { free: true, name: '小星星 · 移植', notes: [
     ...P([[1,'s'],[1,'s'],[4,'s'],[4,'s'],[5,'s'],[5,'s'],[4,'s']], '一闪一闪亮晶晶'),
     ...P([[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s'],[2,'s'],[1,'s']], '满天都是小星星'),
     ...P([[4,'s'],[4,'s'],[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s']], '挂在天空放光明'),
@@ -863,7 +876,7 @@ const SCORES = {
     ...P([[1,'s'],[1,'s'],[4,'s'],[4,'s'],[5,'s'],[5,'s'],[4,'s']], '一闪一闪亮晶晶'),
     ...P([[3,'s'],[3,'s'],[1,'a',10],[1,'a',10],[2,'s'],[2,'s'],[1,'s']], '满天都是小星星'),
   ] },
-  laohu: { name: '两只老虎 · 移植', notes: [
+  laohu: { free: true, name: '两只老虎 · 移植', notes: [
     ...P([[1,'s'],[2,'s'],[1,'a',10],[1,'s']], '两只老虎'),
     ...P([[1,'s'],[2,'s'],[1,'a',10],[1,'s']], '两只老虎'),
     ...P([[1,'a',10],[3,'s'],[4,'s']], '跑得快'),
@@ -873,7 +886,7 @@ const SCORES = {
     ...P([[1,'s'],[4,'s'],[1,'s']], '真奇怪'),
     ...P([[1,'s'],[4,'s'],[1,'s']], '真奇怪'),
   ] },
-  xianweng: { name: '仙翁操 · 开指', notes: [
+  xianweng: { free: true, name: '仙翁操 · 开指', notes: [
     ...P([[3,'a',8],[6,'s']], '仙翁'), ...P([[3,'a',8],[6,'s']], '仙翁'),
     ...P([[2,'a',8],[5,'s']], '仙翁'), ...P([[2,'a',8],[5,'s']], '仙翁'),
     ...P([[1,'a',8],[4,'s']], '仙翁'), ...P([[1,'a',8],[4,'s']], '仙翁'),
@@ -938,11 +951,30 @@ const PRAISE = {
   comeback: ['找回来了!', '对,就是这个位置'],
 };
 
+const PREVIEW_N = 6;   // 白身试奏锁定曲的音数(一句)
 function gameSet(key) {
-  game = key && SCORES[key] ? {
-    key, notes: SCORES[key].notes, idx: 0, hit: 0, miss: 0,
+  if (!key) { game = null; return; }
+  if (key === 'daily') {
+    // 每日一句:按日期从锁定曲库确定性取一句(8 音),白身可完整弹——试吃+打卡
+    const locked = Object.keys(SCORES).filter(k => !SCORES[k].free);
+    const day = Math.floor(Date.now() / 86400000);
+    const sk = locked[day % locked.length];
+    const src = SCORES[sk].notes;
+    const start = src.length > 9 ? (day * 7) % (src.length - 8) : 0;
+    game = {
+      key: 'daily', daily: true, srcName: SCORES[sk].name,
+      notes: src.slice(start, start + 8), idx: 0, hit: 0, miss: 0,
+      flashT: -1e9, flashOk: true, hint: '', hintT: -1e9, doneT: 0,
+    };
+    return;
+  }
+  const meta = SCORES[key];
+  if (!meta) { game = null; return; }
+  game = {
+    key, notes: meta.notes, preview: !meta.free && !ENT.zhiyin,   // 锁定曲:白身试奏一句
+    idx: 0, hit: 0, miss: 0,
     flashT: -1e9, flashOk: true, hint: '', hintT: -1e9, doneT: 0,
-  } : null;
+  };
 }
 
 function typeName(t) { return t === 's' ? '散' : t === 'a' ? '按' : '泛'; }
@@ -985,6 +1017,19 @@ function judgeNote(i, opts) {
     game.lastWasMiss = false;
     game.idx++;
     if (game.idx >= game.notes.length) game.doneT = now;
+    else if (game.preview && game.idx >= PREVIEW_N) { game.doneT = now; game.previewEnd = true; }
+    if (game.doneT && game.daily && !game.streakDone) {   // 每日一句:连续打卡
+      game.streakDone = true;
+      const day = Math.floor(Date.now() / 86400000);
+      const last = +localStorage.getItem('qin.dailyDay') || 0;
+      let streak = +localStorage.getItem('qin.streak') || 0;
+      if (day !== last) {
+        streak = (day - last === 1) ? streak + 1 : 1;
+        localStorage.setItem('qin.dailyDay', day);
+        localStorage.setItem('qin.streak', streak);
+      }
+      game.streakN = streak || 1;
+    }
   } else {
     game.miss++; game.hint = hint; game.hintT = now;
     game.streak = 0; game.lastWasMiss = true;
@@ -1531,13 +1576,21 @@ function drawGame(now) {
     ctx2d.textAlign = 'center';
     ctx2d.fillStyle = '#d8c9a3';
     ctx2d.font = `${26 * dpr()}px ${JZ_FONT}`;
-    ctx2d.fillText('曲 终', cx, top + 30 * dpr());
+    ctx2d.fillText(game.previewEnd ? '试 奏 至 此' : game.daily ? '今 日 已 成' : '曲 终', cx, top + 30 * dpr());
     ctx2d.font = `${14 * dpr()}px serif`;
     ctx2d.fillText(`命中 ${game.hit} · 误弹 ${game.miss}`, cx, top + 58 * dpr());
-    const acc = game.hit / Math.max(1, game.hit + game.miss);
     ctx2d.font = `${17 * dpr()}px ${JZ_FONT}`;
-    ctx2d.fillStyle = '#8fe0a8';
-    ctx2d.fillText(acc === 1 ? '满堂彩!一曲既终,余音绕梁' : acc > 0.8 ? '弹得漂亮,再来一遍更佳' : '熟能生巧,再试一次', cx, top + 86 * dpr());
+    if (game.previewEnd) {
+      ctx2d.fillStyle = '#e8c04c';
+      ctx2d.fillText('全曲与雅号印,藏于「知音」', cx, top + 86 * dpr());
+    } else if (game.daily) {
+      ctx2d.fillStyle = '#8fe0a8';
+      ctx2d.fillText(`连续练琴 ${game.streakN || 1} 日 · 出自${game.srcName}` + (ENT.zhiyin ? '' : ',全曲藏于「知音」'), cx, top + 86 * dpr());
+    } else {
+      const acc = game.hit / Math.max(1, game.hit + game.miss);
+      ctx2d.fillStyle = '#8fe0a8';
+      ctx2d.fillText(acc === 1 ? '满堂彩!一曲既终,余音绕梁' : acc > 0.8 ? '弹得漂亮,再来一遍更佳' : '熟能生巧,再试一次', cx, top + 86 * dpr());
+    }
     return;
   }
   const exp = game.notes[game.idx];
@@ -1639,14 +1692,20 @@ function drawDebug() {
 
 // ---------- 落款印章:录制水印 ----------
 // 免费版官印「無絃琴」朱印随视频落款;付费去印/自定义雅号印 → 接内购后置 true
-const NO_WATERMARK = false;
 const sealImg = new Image();
 sealImg.src = 'icons/icon-192.png';
 function drawSeal() {
-  if (!recorder || NO_WATERMARK) return;
+  if (!recorder) return;
+  // 白身:官印「無絃琴」+logo;知音:自定义雅号印(未刻则不落印)——落款即身份
+  let chars;
+  if (ENT.zhiyin) {
+    const nm = sealName();
+    if (!nm) return;
+    chars = [...nm];
+  } else chars = ['無', '絃', '琴'];
   const s = 62 * dpr(), m = 16 * dpr();
-  // 品牌 logo(印章上方,圆角裁切)
-  if (sealImg.complete && sealImg.naturalWidth) {
+  // 品牌 logo(印章上方,圆角裁切;知音雅号印不带官方 logo)
+  if (!ENT.zhiyin && sealImg.complete && sealImg.naturalWidth) {
     const ls = 46 * dpr(), lx = W - m - s / 2 - ls / 2, ly = H - m - s - 10 * dpr() - ls;
     ctx2d.save();
     ctx2d.globalAlpha = 0.92;
@@ -1666,9 +1725,17 @@ function drawSeal() {
   ctx2d.stroke();
   ctx2d.fillStyle = '#f0e6d6';
   ctx2d.textAlign = 'center';
-  const f = s * 0.26;
-  ctx2d.font = `${f}px ${JZ_FONT}`;
-  ['無', '絃', '琴'].forEach((ch, i) => ctx2d.fillText(ch, 0, (i - 1) * s * 0.29 + f * 0.35));
+  if (chars.length === 4) {   // 四字雅号:传统 2×2 印式(右上→右下→左上→左下)
+    const f = s * 0.30;
+    ctx2d.font = `${f}px ${JZ_FONT}`;
+    const px2 = [s * 0.16, s * 0.16, -s * 0.16, -s * 0.16];
+    const py2 = [-s * 0.15, s * 0.17, -s * 0.15, s * 0.17];
+    chars.forEach((ch, i) => ctx2d.fillText(ch, px2[i], py2[i] + f * 0.35));
+  } else {                    // 一至三字:竖排
+    const f = s * (chars.length <= 2 ? 0.32 : 0.26);
+    ctx2d.font = `${f}px ${JZ_FONT}`;
+    chars.forEach((ch, i) => ctx2d.fillText(ch, 0, (i - (chars.length - 1) / 2) * s * 0.29 + f * 0.35));
+  }
   ctx2d.restore();
 }
 
@@ -1891,6 +1958,20 @@ applyMode('f');
 
 const scoreSel = document.getElementById('scoreSel');
 scoreSel.addEventListener('change', () => gameSet(scoreSel.value));
+// 白身视角:锁定曲带 🔒(仍可试奏一句——付费时机放在动机峰值,不藏内容目录)
+for (const opt of scoreSel.options) {
+  const m = SCORES[opt.value];
+  if (m && !m.free && !ENT.zhiyin) opt.textContent += ' 🔒';
+}
+// 雅印(知音专属):刻 1~4 字雅号,落款于录制
+const sealBtn = document.getElementById('sealBtn');
+if (ENT.zhiyin) sealBtn.style.display = '';
+sealBtn.addEventListener('click', () => {
+  const v = prompt('刻你的雅号印(1~4 字,留空=不落印):', sealName());
+  if (v === null) return;
+  localStorage.setItem('qin.sealName', v.trim().slice(0, 4));
+  statusNote = v.trim() ? '雅印已刻:' + v.trim().slice(0, 4) : '已去印';
+});
 
 // ---------- 鼠标 / 键盘试音(无摄像头也可) ----------
 function mouseDown(e) {
