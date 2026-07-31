@@ -122,6 +122,7 @@
   <label><input type="checkbox" id="octChk"> 高八度</label>
   <label title="若系统认反了左右手(摄像头信号源已预翻转),切换此项"><input type="checkbox" id="mirChk" checked> 镜像</label>
   <label title="显示手势判定量表与延迟分解(快捷键 D):没响/误响时看这里"><input type="checkbox" id="dbgChk"> 调试</label>
+  <label title="预判拨弦:按指尖轨迹提前定时发声,抵消摄像头与识别延迟,动作-发声更同步;手指急停可能偶发幽灵音,可关闭对比"><input type="checkbox" id="predChk" checked> 预判</label>
   <button id="rptBtn" title="弹完过来点一下:近10秒的性能与判定数据汇成文本,直接分享/复制——不必截图">报告</button>
   <button id="lockBtn" title="锁定后双手平举不会重新定琴;点击解锁可重新定琴">🔓 琴位</button>
   <label title="开:录整个页面(含顶部控件与全部提示,浏览器会弹一次画面选择,请选『此标签页』);关:只录琴面并隐去提示,出干净演奏视频,无弹框"><input type="checkbox" id="recHintChk" checked> 含提示</label>
@@ -137,7 +138,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.12.3';
+const APP_VER = 'v0.13.0';
 document.getElementById('ver').textContent = '無絃琴 ' + APP_VER;
 console.log('[无弦琴]', APP_VER);
 
@@ -278,6 +279,8 @@ let handPoint = new Map();         // 每只手"点指"状态(食指伸、余指
 let handFinger = new Map();        // 逐指"触弦态"记分(带衰减记忆):合上的指不碰弦,伸着的指才碰弦
 let pressFistN = 0;                // 按弦手握拳连续帧计数(≥2 触发煞音)
 let pressLatch = false;            // 按弦意图闩锁:点指即按,模糊姿态保持,张手/握拳/离带即释
+const predAt = new Array(7).fill(-1e9);   // 各弦最近预判时刻(与实测穿弦去重)
+const predBy = new Array(7).fill(null);   // 各弦预判来源 {key, vy}(下一帧校验轨迹,失效即撤)
 let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
 let lastPluckedIdx = -1, pressHandKey = null;
 let pluckHandKey = null, roleSwapT = 0;   // 拨弦手(靠岳山侧,带滞回)
@@ -303,6 +306,7 @@ const octChk = document.getElementById('octChk');
 const tickChk = document.getElementById('tickChk');
 const mirChk = document.getElementById('mirChk');
 const dbgChk = document.getElementById('dbgChk');
+const predChk = document.getElementById('predChk');
 const recBtn = document.getElementById('recBtn');
 const modeSel = document.getElementById('modeSel');
 const lockBtn = document.getElementById('lockBtn');
@@ -337,11 +341,16 @@ const WORKLET_SRC = [
 '    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
 '    this.pos = 0.12; this.combOff = 8;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
 '    this.nh = new Float32Array(4096); this.nhi = 0;',
+'    this.pend = null;',            // 预判定时拨弦(音频时钟精确调度)
 '    this.port.onmessage = (e) => {',
-'      if (e.data.type === "pluck") {',
-'        this.amp = e.data.amp; this.snapNext = true;',
-'        this.pos = e.data.pos || 0.12;',
+'      const d = e.data;',
+'      if (d.type === "pluck") {',
+'        if (d.when && d.when > currentTime) { this.pend = d; return; }',
+'        this.amp = d.amp; this.snapNext = true;',
+'        this.pos = d.pos || 0.12;',
 '        this.exciteLeft = -1;',
+'      } else if (d.type === "unpluck") {',   // 轨迹失效,撤销未发的预判音
+'        this.pend = null;',
 '      }',
 '    };',
 '  }',
@@ -351,6 +360,10 @@ const WORKLET_SRC = [
 '    const target = Math.max(4, sampleRate / f - 0.5);',
 '    const fb = Math.exp(Math.log(0.001) / (f * p.t60[0]));',
 '    const bright = p.brightness[0];',
+'    if (this.pend && currentTime >= this.pend.when - 128 / sampleRate) {',
+'      this.amp = this.pend.amp; this.pos = this.pend.pos || 0.12;',
+'      this.snapNext = true; this.exciteLeft = -1; this.pend = null;',
+'    }',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
 '    if (this.exciteLeft === -1) {',
 '      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
@@ -453,9 +466,9 @@ async function loadFanSamples() {
   }
 }
 
-function playFanSample(i, targetFreq, amp) {
+function playFanSample(i, targetFreq, amp, when) {
   const sm = fanSamples[i];
-  const t = audioCtx.currentTime;
+  const t = Math.max(audioCtx.currentTime, when || 0);
   const src = new AudioBufferSourceNode(audioCtx, {
     buffer: sm.buf, playbackRate: targetFreq / sm.baseFreq,
   });
@@ -496,7 +509,7 @@ function pluck(i, amp, freq, opts = {}) {
     const node = stringNodes[i];
     if (opts.harmonic && fanSamples[i]) {
       // 真琴采样优先;轻触节点按灭该弦原有振动(真琴物理),下次拨弦自复位
-      playFanSample(i, freq * octMul(), amp);
+      playFanSample(i, freq * octMul(), amp, opts.when);
       node.parameters.get('t60').value = 0.12;
       if (!opts.noJudge) judgeNote(i, opts);
       console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label}(采样)`);
@@ -511,7 +524,7 @@ function pluck(i, amp, freq, opts = {}) {
     const pos = opts.plX != null
       ? Math.min(0.5, Math.max(0.05, (qin.xY * W - opts.plX) / Math.max(1, qin.xY * W - stopX)))
       : 0.12;
-    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos });
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos, when: opts.when || 0 });
   }
   if (!opts.noJudge) judgeNote(i, opts);
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
@@ -582,7 +595,7 @@ async function initCamera(deviceId) {
   // 推理输入减半——实测 iPhone CPU 路径 90ms/帧的主要解药
   const coarse = matchMedia('(pointer: coarse)').matches;
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { ...pick, width: { ideal: coarse ? 640 : 1280 }, height: { ideal: coarse ? 480 : 720 } },
+    video: { ...pick, width: { ideal: coarse ? 640 : 1280 }, height: { ideal: coarse ? 480 : 720 }, frameRate: { ideal: 60 } },
     audio: false,
   });
   video.srcObject = stream;
@@ -1068,23 +1081,58 @@ function playFacade() {
     if (now > mousePressUntil) pressLine = null;
   }
 
-  // 3) 拨弦:仅拨弦手、且"那根手指"处于触弦态时,其指尖穿过弦线才发声——
-  //    门控逐指而非整手:收拢的指=抬离弦面,伸着的指才碰弦;全握拳=静默换弦;
-  //    力度以手掌为尺(vn = 像素速度/手掌大小)→ 与距离无关
+  // 3a) 预判撤销:上帧预判之音,本帧轨迹失效(减速/反向且未过弦)则撤回未发之声
+  for (let i = 0; i < 7; i++) {
+    const pb = predBy[i];
+    if (!pb) continue;
+    if (now - pb.t > 300) { predBy[i] = null; continue; }
+    let cur = null;
+    for (const hd2 of curHands) for (const tp of hd2.tips) if (tp.key === pb.key) cur = tp;
+    if (!cur) continue;                                  // 手指暂失踪,不妄断
+    const sy = strings[i].y;
+    const crossed = (sy - cur.y) * pb.vy <= 0;           // 已行至弦另一侧
+    const pv = prevTips.get(pb.key);
+    const vyNow = pv ? cur.y - pv.y : pb.vy;
+    const stillGoing = vyNow * pb.vy > 0 && Math.abs(vyNow) >= Math.abs(pb.vy) * 0.35;
+    if (crossed) predBy[i] = null;                       // 预判成立
+    else if (!stillGoing) {
+      if (masterReady) stringNodes[i].port.postMessage({ type: 'unpluck' });
+      predAt[i] = -1e9; predBy[i] = null;
+      console.log('[预撤] 弦' + STRING_NAMES[i]);
+    }
+  }
+
+  // 3b) 拨弦:仅拨弦手、且"那根手指"处于触弦态时——
+  //    实测穿弦即发声(与近期预判去重);开启「预判」时,对高速冲向弦线的指尖
+  //    外推触弦时刻,扣除管线延迟(所见本是旧影)后用音频时钟提前定时发声,
+  //    把"看见才响"的半帧+管线滞后压到接近音频输出下限
+  const pipeMs = (perfM.camLag || perfM.frameDt * 1.5) + perfM.infer;
   for (const hd of curHands) {
     const isPress = pressH && hd.key === pressH.key;
     for (const tip of hd.tips) {
       const prev = prevTips.get(tip.key);
       if (prev && !isPress && tip.fs >= 0.5 &&
           tip.x > (qin.xL - 0.02) * W && tip.x < (qin.xY + 0.03) * W) {
-        const vn = Math.abs(tip.y - prev.y) / hd.size * dtScale;
-        // 泛音模式(捏合中)拨弦阈值放宽:泛音本就轻,弦要"更好拨动"
-        if (vn > (pressInfo && pressInfo.pinch ? 0.04 : 0.055)) {
+        const vyPix = tip.y - prev.y;
+        const vn = Math.abs(vyPix) / hd.size * dtScale;
+        const thr = pressInfo && pressInfo.pinch ? 0.04 : 0.055;
+        if (vn > thr) {
+          const amp = Math.min(1, 0.15 + 0.85 * Math.tanh(vn * 4));
           for (let i = 0; i < 7; i++) {
             const sy = strings[i].y;
             if ((prev.y - sy) * (tip.y - sy) < 0) {
-              const amp = Math.min(1, 0.15 + 0.85 * Math.tanh(vn * 4));
-              fPluck(i, amp, pressInfo, tip.x, hd.key);
+              if (now - predAt[i] > 260)                 // 已被预判发声则不重复
+                fPluck(i, amp, pressInfo, tip.x, hd.key);
+            } else if (predChk.checked && masterReady && vn > thr * 1.25
+                && (sy - tip.y) * vyPix > 0) {          // 高速冲向且尚未过弦
+              const framesToHit = (sy - tip.y) / vyPix;
+              if (framesToHit > 0 && framesToHit <= 1.35 && now - predAt[i] > 260) {
+                const delayMs = Math.max(0, framesToHit * perfM.frameDt - pipeMs);
+                fPluck(i, amp, pressInfo, tip.x, hd.key, audioCtx.currentTime + delayMs / 1000);
+                predAt[i] = now;
+                predBy[i] = { key: tip.key, vy: vyPix, t: now };
+                console.log('[预拨] 弦' + STRING_NAMES[i] + ' +' + (delayMs | 0) + 'ms');
+              }
             }
           }
         }
@@ -1104,7 +1152,7 @@ function playFacade() {
   }
 }
 
-function fPluck(i, amp, pressInfo, plX, handKey) {
+function fPluck(i, amp, pressInfo, plX, handKey, when) {
   const t = (plX - qin.xL * W) / ((qin.xY - qin.xL) * W);
   const plyBonus = (Math.min(1, Math.max(0, t)) - 0.5) * 0.18;  // 近岳山处拨弦更亮
   let freq = strings[i].openFreq, opts = { plyBonus };
@@ -1124,6 +1172,7 @@ function fPluck(i, amp, pressInfo, plX, handKey) {
     opts.pressF = pressInfo.f;
   }
   opts.plX = plX;
+  if (when) opts.when = when;
   pluck(i, amp, freq, opts);
   lastPluckedIdx = i;
 }
@@ -1740,6 +1789,7 @@ function applyMode(m) {
   prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear(); handPoint.clear(); handFinger.clear();
   pressLine = null; lastPluckedIdx = -1; pressHandKey = null;
   pluckHandKey = null; roleSwapT = 0; pressFistN = 0; pressLatch = false; lastPressSi = -1;
+  predAt.fill(-1e9); predBy.fill(null);
   qin = { ...QIN_DEFAULT };          // 切换模式恢复默认琴位,平举定琴可随时重设
   refreshGeom();
   setQinLock(false);
