@@ -238,7 +238,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.20.0';
+const APP_VER = 'v0.20.1';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -928,7 +928,9 @@ function readHands(ts) {
     }
     const nowMs = performance.now();
     if (tipVn > vnPeak.v || nowMs - vnPeak.t > 10000) vnPeak = { v: tipVn, t: nowMs };
-    curHands.push({ key, wx, wy, tips, pinch, point, open, ok, extRaw: ext, speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
+    curHands.push({ key, wx, wy, tips, pinch, point, open, ok, extRaw: ext,
+      extR: (fexR[0] ? 1 : 0) + (fexR[1] ? 1 : 0) + (fexR[2] ? 1 : 0) + (fexR[3] ? 1 : 0),   // 纯径向伸指数:拳=0(zFwd/捏合不干扰)
+      speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
   }
 
   // 距离教练:手掌成像大小 → 提示与摄像头的合适距离
@@ -1401,7 +1403,7 @@ function ftueCelebrate(txt) {
 }
 function ftueAdvance(txt) {
   if (txt) ftueCelebrate(txt);
-  ftue.step++; ftue.cnt = 0; ftue.strs.clear(); ftue.fistT = 0; ftue.slideN = 0;
+  ftue.step++; ftue.cnt = 0; ftue.strs.clear(); ftue.fistT = 0; ftue.fistMs = 0; ftue.fistLast = 0; ftue.slideN = 0;
   if (ftue.step === 6) gameSet('ftue');
   if (ftue.step >= 7) ftueFinish();
 }
@@ -1436,9 +1438,14 @@ function ftueOnSlide(freq) {
 function ftueTick(now) {
   if (!ftue.active) return;
   if (ftue.step === 2) {
-    const fist = curHands.find(h => h.extRaw === 0 && !h.pinch);
-    if (fist) { if (!ftue.fistT) ftue.fistT = now; if (now - ftue.fistT > 800) ftueAdvance('握拳过弦,寂然无声'); }
-    else ftue.fistT = 0;
+    // 拳=四指纯径向收拢(extR===0)。曾用 extRaw===0 && !pinch:真拳常带 zFwd
+    // 前探计入 ext、拳中拇食相触又触发捏合,三重误杀致此步只能跳过(用户报告)
+    const fist = curHands.find(h => h.extR === 0);
+    if (fist) {
+      ftue.fistMs = (ftue.fistMs || 0) + Math.min(100, now - (ftue.fistLast || now));
+      ftue.fistLast = now;
+      if (ftue.fistMs > 700) ftueAdvance('握拳过弦,寂然无声');
+    } else if (now - (ftue.fistLast || 0) > 600) { ftue.fistMs = 0; }
   } else if (ftue.step === 6) {
     if (!game || game.key !== 'ftue') gameSet('ftue');   // 引导中被切谱,拉回小谱
     else if (game.doneT) ftueAdvance();
