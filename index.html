@@ -140,7 +140,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.14.0';
+const APP_VER = 'v0.14.1';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -788,6 +788,8 @@ function readHands(ts) {
     // 逐指触弦态记分(0.85/帧衰减≈4帧记忆,拨弦动作中瞬间弯曲不误伤):
     // 收拢的指=抬离弦面,划过弦线不发声——"合上的手指不碰弦"(用户报告)
     const factive = [thumbOut, fex[0], fex[1], fex[2], fex[3]];
+    // 拇食相合的捻拨(如持拨片):合尖即触弦态,拇指食指计为可拨;捏合手不算拳
+    if (pinch) { factive[0] = true; factive[1] = true; if (ext === 0) ext = 1; }
     const prevFs = handFinger.get(key) || [0, 0, 0, 0, 0];
     const fscore = factive.map((a, j) => Math.max(a ? 1 : 0, prevFs[j] * 0.85));
     handFinger.set(key, fscore);
@@ -1112,7 +1114,8 @@ function playFacade() {
   //    否则按站位定(古琴语法:靠岳山右侧的手司弹),0.5s 滞回防瞬时交叉误换
   let pressH = null;
   if (curHands.length >= 2) {
-    const pinched = curHands.filter(hd => hd.pinch);
+    // 静态捏合=泛音宣告;高速移动的捏合=捻拨击弦(用户手型),不夺按弦角色
+    const pinched = curHands.filter(hd => hd.pinch && hd.tipVn < 0.07);
     const pointed = curHands.filter(hd => hd.point);
     if (pinched.length === 1) {
       pressH = pinched[0];
@@ -1136,7 +1139,7 @@ function playFacade() {
   } else if (curHands.length === 1) {
     // 单手:点指/捏合的指型宣告=按弦手(可单手按徽/泛);否则为拨弦手
     const h = curHands[0];
-    if (h.pinch || h.point) pressH = h;
+    if ((h.pinch && h.tipVn < 0.07) || h.point) pressH = h;
     else { pluckHandKey = h.key; roleSwapT = 0; }
   }
   pressHandKey = pressH ? pressH.key : null;
