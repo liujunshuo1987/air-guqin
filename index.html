@@ -155,6 +155,29 @@
   .mp-foot span { cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
   @keyframes mpPulse { 0% { box-shadow:0 0 0 0 rgba(232,192,76,.55); } 100% { box-shadow:0 0 0 9px rgba(232,192,76,0); } }
 </style>
+<div id="pvCard" style="display:none; position:fixed; inset:0; z-index:7; background:rgba(5,7,10,.55); align-items:center; justify-content:center">
+  <div style="background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:24px 32px; text-align:center; min-width:252px">
+    <div style="font-size:20px; letter-spacing:6px; color:#d8c9a3; margin-bottom:8px">试 奏 至 此</div>
+    <div id="pvName" style="font-size:12px; color:#9a8f74; margin-bottom:4px"></div>
+    <div style="font-size:13px; color:#e8c04c; margin-bottom:16px">全篇与雅号印,藏于「知音」</div>
+    <button id="pvZy">了解知音</button>
+    <button id="pvAgain">再试一遍</button>
+    <div id="pvDrop" style="margin-top:14px; font-size:12px; color:#9a8f74; cursor:pointer; text-decoration:underline; text-underline-offset:3px">收谱,自由弹奏</div>
+  </div>
+</div>
+<div id="zyPage" style="display:none; position:fixed; inset:0; z-index:9; background:rgba(5,7,10,.97); overflow-y:auto; -webkit-overflow-scrolling:touch">
+  <div style="max-width:430px; margin:0 auto; padding:36px 26px 60px; text-align:center">
+    <div style="font-size:27px; letter-spacing:10px; text-indent:10px; color:#d8c9a3">知 音</div>
+    <div style="font-size:12px; color:#7d8a6a; letter-spacing:2px; margin:10px 0 30px">乐器永远免费 · 曲库赠予知音</div>
+    <div class="zy-item"><b>三卷全启</b><span>移植 · 古调 · 大曲,十一谱全篇尽弹,后续新谱入库同享</span></div>
+    <div class="zy-item"><b>雅号之印</b><span>刻你的一至四字雅号,朱砂落款于每一段录制——你的琴,你的印</span></div>
+    <div class="zy-item"><b>金玉之声</b><span>真琴采样音色层(录制中),上线即启,不另收费</span></div>
+    <div style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · ¥45 · 永久</div>
+    <div id="zyStatus" style="font-size:12px; color:#9a8f74; margin-bottom:24px; line-height:1.8"></div>
+    <button id="zySeal" style="display:none">刻我的雅号印</button>
+    <button id="zyClose">回琴</button>
+  </div>
+</div>
 <div id="dailyToast" style="display:none; position:fixed; top:15%; left:50%; transform:translateX(-50%); z-index:6; background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:14px 22px; text-align:center; transition:opacity .6s">
   <div style="font-size:15px; color:#d8c9a3; letter-spacing:2px; margin-bottom:4px">每日一句</div>
   <div id="dtLine" style="font-size:12px; color:#9a8f74; margin-bottom:10px"></div>
@@ -176,13 +199,18 @@
     <div class="mp-sub">分卷修行 · 每曲四星:曲终 八成准 一音不失 盲谱</div>
     <div class="mp-daily" id="mpDaily"></div>
     <div id="mpBody"></div>
-    <div class="mp-foot"><span id="mpFtue">重修「开指引导」</span>&emsp;·&emsp;<span id="mpFree">收谱 · 自由弹奏</span></div>
+    <div class="mp-foot"><span id="mpFtue">重修「开指引导」</span>&emsp;·&emsp;<span id="mpFree">收谱 · 自由弹奏</span>&emsp;·&emsp;<span id="mpZyLink">知音</span></div>
   </div>
 </div>
 <style>
-  #result button, #shareCard button, #dailyToast button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
+  #result button, #shareCard button, #dailyToast button, #pvCard button, #zyPage button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
     background: rgba(11,14,18,.6); color: #d8c9a3; border: 1px solid #6b5a3a; border-radius: 4px; cursor: pointer; }
-  #result button:hover, #shareCard button:hover, #dailyToast button:hover { border-color: #c9b787; }
+  #result button:hover, #shareCard button:hover, #dailyToast button:hover, #pvCard button:hover, #zyPage button:hover { border-color: #c9b787; }
+  .zy-item { display: flex; gap: 14px; align-items: baseline; text-align: left; margin-bottom: 14px; }
+  .zy-item b { font-weight: normal; color: #c9b787; font-size: 14px; letter-spacing: 2px; flex: none; }
+  .zy-item span { color: #9a8f74; font-size: 13px; line-height: 1.6; }
+  .mp-zy { cursor: pointer; }
+  .mp-zy:hover { color: #c9b787; }
   #mapBtn { position: relative; }
   #mapBtn.dot::after { content: ''; position: absolute; top: -3px; right: -3px;
     width: 7px; height: 7px; border-radius: 50%; background: #c94f3d; }
@@ -210,7 +238,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.19.0';
+const APP_VER = 'v0.20.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1163,6 +1191,38 @@ function heartPose() {
   return c;
 }
 
+// ---------- 知音介绍页:付费墙的着陆点(施工序⑦) ----------
+// 三个入口:试奏截停转化卡 / 地图锁定卷章头 / 卷轴页脚。IAP 未上线前诚实占位:
+// 网页版以试奏相赠,解锁待 App Store 版——付费统一走 IAP(定价与权益勿在此页外另说)
+function zyOpen() {
+  stat('zy_view');
+  document.getElementById('zyStatus').innerHTML = ENT.zhiyin
+    ? '✓ 你已是知音,谢谢你的相知'
+    : '解锁在 App Store 版 · 即将上线<br>网页版以试奏相赠,先弹为敬';
+  document.getElementById('zySeal').style.display = ENT.zhiyin ? '' : 'none';
+  document.getElementById('zyPage').style.display = 'block';
+}
+document.getElementById('zyClose').addEventListener('click', () => {
+  document.getElementById('zyPage').style.display = 'none';
+});
+document.getElementById('zySeal').addEventListener('click', () => {
+  document.getElementById('zyPage').style.display = 'none';
+  mapClose();
+  sealBtn.click();
+});
+document.getElementById('pvZy').addEventListener('click', () => {
+  document.getElementById('pvCard').style.display = 'none';
+  zyOpen();
+});
+document.getElementById('pvAgain').addEventListener('click', () => {
+  document.getElementById('pvCard').style.display = 'none';
+  gameSet(game.key);
+});
+document.getElementById('pvDrop').addEventListener('click', () => {
+  document.getElementById('pvCard').style.display = 'none';
+  gameSet(''); scoreSel.value = '';
+});
+
 // ---------- 每日一句 · 门口迎接:回访者入席即迎,不挡新人开指 ----------
 // 习惯钩子第一原则:在门口等,不在菜单里藏。连续日在险(昨日刚打卡)时点破利害
 let dailyToastT = 0;
@@ -1219,7 +1279,7 @@ function mapBuild() {
   document.getElementById('mpBody').innerHTML = CHAPTERS.map(ch => {
     const locked = ch.keys.every(k => !SCORES[k].free) && !ENT.zhiyin;
     return `<div class="mp-ch"><div class="mp-chname">${ch.name}</div>
-      <div class="mp-chsub">${locked ? '藏于「知音」 · 皆可试奏一句' : ch.sub}</div>
+      <div class="mp-chsub${locked ? ' mp-zy' : ''}">${locked ? '藏于「知音」 · 皆可试奏一句 ›' : ch.sub}</div>
       <div class="mp-list">` + ch.keys.map(k => {
         const pv = prog[k] || { s: 0 };
         const stN = STAR_BITS.filter(b => pv.s & b).length;
@@ -1240,12 +1300,14 @@ document.getElementById('mapCloseX').addEventListener('click', mapClose);
 mapEl.addEventListener('click', (e) => { if (e.target === mapEl) mapClose(); });
 document.getElementById('mpDaily').addEventListener('click', () => { scoreSel.value = 'daily'; gameSet('daily'); mapClose(); });
 document.getElementById('mpBody').addEventListener('click', (e) => {
+  if (e.target.closest('.mp-zy')) { zyOpen(); return; }
   const row = e.target.closest('.mp-song');
   if (!row) return;
   scoreSel.value = row.dataset.k; gameSet(row.dataset.k); mapClose();
 });
 document.getElementById('mpFtue').addEventListener('click', () => { mapClose(); ftueStart(); });
 document.getElementById('mpFree').addEventListener('click', () => { scoreSel.value = ''; gameSet(''); mapClose(); });
+document.getElementById('mpZyLink').addEventListener('click', zyOpen);
 
 // ---------- 四星与结算(弹完不蒸发:星入档、档上榜) ----------
 // 四星判据:★1 曲终 ★2 准确≥80% ★3 一音不失 ★4 盲谱全对(全程关投影)
@@ -1268,7 +1330,14 @@ function refreshScoreOpts() {
 }
 function settle() {
   game.settleDone = true;
-  if (game.daily || game.key === 'ftue' || game.previewEnd) return;   // 各有专属横幅
+  if (game.previewEnd) {   // 试奏截停=动机峰值:横幅让位转化卡
+    stat('pv_card');
+    game.carded = true;
+    document.getElementById('pvName').textContent = SCORES[game.key].name;
+    document.getElementById('pvCard').style.display = 'flex';
+    return;
+  }
+  if (game.daily || game.key === 'ftue') return;   // 各有专属横幅
   const skips = game.skipN || 0;
   const acc = game.hit / Math.max(1, game.hit + game.miss + skips);
   let s = 1;
@@ -2499,6 +2568,9 @@ window.addEventListener('keydown', (e) => {
   if ((e.key === 'n' || e.key === 'N') && game && !game.doneT) {   // 跳过当前谱音
     game.idx++; game.hint = ''; game.skipN = (game.skipN || 0) + 1;   // 跳过≠弹对:入准确率分母,失三四星
     if (game.idx >= game.notes.length) game.doneT = performance.now();
+    else if (game.preview && game.idx >= PREVIEW_N) {   // 跳过同样到达试奏边界
+      game.doneT = performance.now(); game.previewEnd = true; stat('paywall_hit');
+    }
     return;
   }
   const n = parseInt(e.key);
