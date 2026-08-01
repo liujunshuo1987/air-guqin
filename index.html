@@ -114,6 +114,7 @@
   <label><input type="checkbox" id="snapChk" checked> 徽位吸附</label>
   <label><input type="checkbox" id="tickChk" checked> 徽位提示音</label>
   <label><input type="checkbox" id="octChk"> 高八度</label>
+  <label title="跟谱时隐去琴面投影(目标弦辉光与徽位幽灵线),只凭减字牌弹——全对可得第四星"><input type="checkbox" id="blindChk"> 盲谱</label>
   <label title="若系统认反了左右手(摄像头信号源已预翻转),切换此项"><input type="checkbox" id="mirChk" checked> 镜像</label>
   <label title="显示手势判定量表与延迟分解(快捷键 D):没响/误响时看这里"><input type="checkbox" id="dbgChk"> 调试</label>
   <label title="预判拨弦:按指尖轨迹提前定时发声,抵消摄像头与识别延迟,动作-发声更同步;手指急停可能偶发幽灵音,可关闭对比"><input type="checkbox" id="predChk" checked> 预判</label>
@@ -124,6 +125,24 @@
   <button id="recBtn">⏺ 录制</button>
 </div>
 <div id="tips"></div>
+<style>
+  #result button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
+    background: rgba(11,14,18,.6); color: #d8c9a3; border: 1px solid #6b5a3a; border-radius: 4px; cursor: pointer; }
+  #result button:hover { border-color: #c9b787; }
+  .rs-new { display: inline-block; animation: rsPop 0.6s cubic-bezier(.2,1.6,.4,1) both; }
+  @keyframes rsPop { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+</style>
+<div id="result" style="display:none; position:fixed; inset:0; z-index:7; background:rgba(5,7,10,.55); align-items:center; justify-content:center">
+  <div style="background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:24px 34px; text-align:center; min-width:250px">
+    <div id="rsName" style="font-size:17px; color:#d8c9a3; margin-bottom:12px"></div>
+    <div id="rsStars" style="font-size:32px; letter-spacing:10px; text-indent:10px; margin-bottom:4px"></div>
+    <div style="font-size:10px; color:#7d8a6a; letter-spacing:1px; margin-bottom:14px">曲终 · 八成准 · 一音不失 · 盲谱</div>
+    <div id="rsLine" style="font-size:13px; color:#9a8f74; margin-bottom:6px"></div>
+    <div id="rsNew" style="font-size:13px; color:#e8c04c; margin-bottom:16px; min-height:16px"></div>
+    <button id="rsAgain">再弹一遍</button>
+    <button id="rsClose">收谱</button>
+  </div>
+</div>
 <button id="ftueSkip" style="display:none; position:fixed; right:12px; bottom:110px; z-index:6; font-family:inherit; font-size:12px; padding:4px 10px; background:rgba(11,14,18,.6); color:#9a8f74; border:1px solid #6b5a3a; border-radius:3px; cursor:pointer">跳过此步</button>
 
 <script type="module">
@@ -134,7 +153,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.15.0';
+const APP_VER = 'v0.16.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -973,7 +992,7 @@ function gameSet(key) {
   if (!meta) { game = null; return; }
   game = {
     key, notes: meta.notes, preview: !meta.free && !ENT.zhiyin,   // 锁定曲:白身试奏一句
-    idx: 0, hit: 0, miss: 0,
+    idx: 0, hit: 0, miss: 0, blindRun: blindChk.checked,          // 盲谱星:全程投影关才算
     flashT: -1e9, flashOk: true, hint: '', hintT: -1e9, doneT: 0,
   };
 }
@@ -985,6 +1004,7 @@ function noteDesc(n) {
 
 function judgeNote(i, opts) {
   if (!game || game.doneT) return;
+  if (game.blindRun && blindChk.checked === false) game.blindRun = false;   // 中途开投影即弃盲谱星
   const now = performance.now();
   const exp = game.notes[game.idx];
   let ok = false, hint = '';
@@ -1067,6 +1087,61 @@ function heartPose() {
   if (c.x < W * 0.32 || c.x > W * 0.68) return null;
   return c;
 }
+
+// ---------- 四星与结算(弹完不蒸发:星入档、档上榜) ----------
+// 四星判据:★1 曲终 ★2 准确≥80% ★3 一音不失 ★4 盲谱全对(全程关投影)
+// 存档 qin.prog = { 曲key: { s:星位掩码, acc:最佳准确率, n:弹奏次数 } },按位并集累积
+const blindChk = document.getElementById('blindChk');
+const STAR_BITS = [1, 2, 4, 8];
+const STAR_NAMES = { 1: '曲终', 2: '八成准', 4: '一音不失', 8: '盲谱' };
+function progLoad() { try { return JSON.parse(localStorage.getItem('qin.prog') || '{}'); } catch { return {}; } }
+function progSave(p) { localStorage.setItem('qin.prog', JSON.stringify(p)); }
+function refreshScoreOpts() {
+  const prog = progLoad();
+  for (const opt of scoreSel.options) {
+    const m = SCORES[opt.value];
+    if (!m) continue;
+    if (!opt.dataset.base) opt.dataset.base = opt.textContent;
+    const locked = !m.free && !ENT.zhiyin;
+    const st = prog[opt.value] ? STAR_BITS.filter(b => prog[opt.value].s & b).length : 0;
+    opt.textContent = opt.dataset.base + (locked ? ' 🔒' : '') + (st ? ' ' + '★'.repeat(st) : '');
+  }
+}
+function settle() {
+  game.settleDone = true;
+  if (game.daily || game.key === 'ftue' || game.previewEnd) return;   // 各有专属横幅
+  const skips = game.skipN || 0;
+  const acc = game.hit / Math.max(1, game.hit + game.miss + skips);
+  let s = 1;
+  if (acc >= 0.8) s |= 2;
+  if (game.miss === 0 && !skips) s |= 4;
+  if (game.miss === 0 && !skips && game.blindRun) s |= 8;
+  const prog = progLoad();
+  const pv = prog[game.key] || { s: 0, acc: 0, n: 0 };
+  const nb = s & ~pv.s;   // 本次新收的星
+  prog[game.key] = { s: s | pv.s, acc: Math.max(acc, pv.acc), n: pv.n + 1 };
+  progSave(prog);
+  refreshScoreOpts();
+  game.carded = true;
+  document.getElementById('rsName').textContent = SCORES[game.key].name;
+  document.getElementById('rsStars').innerHTML = STAR_BITS.map(b =>
+    `<span class="${nb & b ? 'rs-new' : ''}" style="color:${s & b ? '#e8c04c' : 'rgba(200,200,200,.22)'}">${s & b ? '★' : '☆'}</span>`).join('');
+  document.getElementById('rsLine').textContent =
+    `中 ${game.hit} · 失 ${game.miss}` + (skips ? ` · 跳 ${skips}` : '') + ` · 准确 ${Math.round(acc * 100)}%`;
+  document.getElementById('rsNew').textContent =
+    nb ? '新得 ' + STAR_BITS.filter(b => nb & b).map(b => '★' + STAR_NAMES[b]).join(' · ')
+       : (pv.n && acc > pv.acc ? '准确新纪录!' : '');
+  document.getElementById('result').style.display = 'flex';
+  if (nb) { beep(880, 0.2, 0.05); setTimeout(() => beep(1320, 0.3, 0.05), 160); }
+}
+document.getElementById('rsAgain').addEventListener('click', () => {
+  document.getElementById('result').style.display = 'none';
+  gameSet(game.key);
+});
+document.getElementById('rsClose').addEventListener('click', () => {
+  document.getElementById('result').style.display = 'none';
+  gameSet(''); scoreSel.value = '';
+});
 
 // ---------- 开指引导(FTUE):零阅读,做一个动作→琴给一个反应→庆祝 ----------
 // 七步:挥手出声→换弦再拨→握拳静默→点指按音→走手音→泛音→跟谱一句仙翁;
@@ -1663,8 +1738,9 @@ function drawJianziGlyph(x, y, h, n) {
 
 function drawGame(now) {
   if (!game) return;
-  if (game.doneT && now - game.doneT > 4000) {
+  if (game.doneT && now - game.doneT > 4000 && !game.carded) {   // 结算卡在场时不自动重开
     game.idx = 0; game.hit = 0; game.miss = 0; game.doneT = 0; game.hint = '';
+    game.settleDone = false;
   }
   const cx = W / 2, top = 72 * dpr();
   const size = 78 * dpr();
@@ -1699,6 +1775,7 @@ function drawGame(now) {
   }
 
   if (game.doneT) {
+    if (game.carded) return;   // 结算卡即是曲终页
     ctx2d.textAlign = 'center';
     ctx2d.fillStyle = '#d8c9a3';
     ctx2d.font = `${26 * dpr()}px ${JZ_FONT}`;
@@ -1724,21 +1801,24 @@ function drawGame(now) {
   // 右上空白:当前音的减字谱近似原貌(魏碑大字)
   drawJianziGlyph(W - 150 * dpr(), 140 * dpr(), 118 * dpr(), exp);
 
-  // 投影到琴面:目标弦呼吸辉光 + 目标徽位幽灵线(泛音月白,按音青绿)
-  const gs = strings[exp.s - 1];
-  const gcol = exp.t === 'f' ? '159,216,232' : '120,232,150';
-  const glow = 0.30 + 0.22 * Math.sin(now * 0.006);
-  ctx2d.strokeStyle = `rgba(${gcol},${glow})`;
-  ctx2d.lineWidth = 7 * dpr();
-  ctx2d.beginPath(); ctx2d.moveTo(qin.xL * W, gs.y); ctx2d.lineTo(qin.xY * W, gs.y); ctx2d.stroke();
-  if (exp.t !== 's') {
-    const tx = hXOf(HUI[exp.h]);
-    ctx2d.setLineDash([6 * dpr(), 6 * dpr()]);
-    ctx2d.strokeStyle = `rgba(${gcol},0.85)`;
-    ctx2d.lineWidth = 2 * dpr();
-    ctx2d.beginPath(); ctx2d.moveTo(tx, bandTop()); ctx2d.lineTo(tx, bandBot()); ctx2d.stroke();
-    ctx2d.setLineDash([]);
-    ctx2d.beginPath(); ctx2d.arc(tx, gs.y, 9 * dpr(), 0, 7); ctx2d.stroke();
+  // 投影到琴面:目标弦呼吸辉光 + 目标徽位幽灵线(泛音月白,按音青绿);
+  // 盲谱开=全部隐去,只凭减字牌识谱而弹(第四星的修行)
+  if (!blindChk.checked) {
+    const gs = strings[exp.s - 1];
+    const gcol = exp.t === 'f' ? '159,216,232' : '120,232,150';
+    const glow = 0.30 + 0.22 * Math.sin(now * 0.006);
+    ctx2d.strokeStyle = `rgba(${gcol},${glow})`;
+    ctx2d.lineWidth = 7 * dpr();
+    ctx2d.beginPath(); ctx2d.moveTo(qin.xL * W, gs.y); ctx2d.lineTo(qin.xY * W, gs.y); ctx2d.stroke();
+    if (exp.t !== 's') {
+      const tx = hXOf(HUI[exp.h]);
+      ctx2d.setLineDash([6 * dpr(), 6 * dpr()]);
+      ctx2d.strokeStyle = `rgba(${gcol},0.85)`;
+      ctx2d.lineWidth = 2 * dpr();
+      ctx2d.beginPath(); ctx2d.moveTo(tx, bandTop()); ctx2d.lineTo(tx, bandBot()); ctx2d.stroke();
+      ctx2d.setLineDash([]);
+      ctx2d.beginPath(); ctx2d.arc(tx, gs.y, 9 * dpr(), 0, 7); ctx2d.stroke();
+    }
   }
 
   // 减字牌:当前音(大,命中后从队列侧滑入) + 后续两音(小)
@@ -1872,6 +1952,7 @@ function draw(now) {
   drawCamera();
   drawHorizontal(now, mode === 'f', clean);
   ftueTick(now);   // 引导状态机挂 rAF(鼠标模式无摄像帧也要走)
+  if (game && game.doneT && !game.settleDone) settle();
   if (!clean) { drawGame(now); drawFtue(now); }
 
   // OK 手势进度环(录制开关)/ 3-2-1 倒计时大字
@@ -2088,11 +2169,9 @@ scoreSel.addEventListener('change', () => {
   if (scoreSel.value === 'ftue') ftueStart();
   else gameSet(scoreSel.value);
 });
-// 白身视角:锁定曲带 🔒(仍可试奏一句——付费时机放在动机峰值,不藏内容目录)
-for (const opt of scoreSel.options) {
-  const m = SCORES[opt.value];
-  if (m && !m.free && !ENT.zhiyin) opt.textContent += ' 🔒';
-}
+// 白身视角:锁定曲带 🔒(仍可试奏一句——付费时机放在动机峰值,不藏内容目录);
+// 已收星的曲目缀 ★,曲库目录即成就榜
+refreshScoreOpts();
 // 雅印(知音专属):刻 1~4 字雅号,落款于录制
 const sealBtn = document.getElementById('sealBtn');
 if (ENT.zhiyin) sealBtn.style.display = '';
@@ -2183,7 +2262,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'd' || e.key === 'D') { dbgChk.checked = !dbgChk.checked; return; }
   if (e.key === 'm' || e.key === 'M') { muteAll(); return; }
   if ((e.key === 'n' || e.key === 'N') && game && !game.doneT) {   // 跳过当前谱音
-    game.idx++; game.hint = '';
+    game.idx++; game.hint = ''; game.skipN = (game.skipN || 0) + 1;   // 跳过≠弹对:入准确率分母,失三四星
     if (game.idx >= game.notes.length) game.doneT = performance.now();
     return;
   }
