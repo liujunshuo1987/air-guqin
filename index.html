@@ -155,6 +155,15 @@
   .mp-foot span { cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
   @keyframes mpPulse { 0% { box-shadow:0 0 0 0 rgba(232,192,76,.55); } 100% { box-shadow:0 0 0 9px rgba(232,192,76,0); } }
 </style>
+<div id="shareCard" style="display:none; position:fixed; inset:0; z-index:9; background:rgba(5,7,10,.55); align-items:center; justify-content:center">
+  <div style="background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:24px 32px; text-align:center; min-width:252px">
+    <div style="font-size:17px; color:#d8c9a3; margin-bottom:6px">琴音已录成</div>
+    <div id="shInfo" style="font-size:12px; color:#9a8f74; margin-bottom:16px"></div>
+    <button id="shShare">分享给琴友</button>
+    <button id="shSave">保存视频</button>
+    <div id="shClose" style="margin-top:14px; font-size:12px; color:#9a8f74; cursor:pointer; text-decoration:underline; text-underline-offset:3px">收起</div>
+  </div>
+</div>
 <div id="map">
   <div class="mp-wrap">
     <div class="mp-head">琴 谱<span id="mapCloseX">✕</span></div>
@@ -165,9 +174,9 @@
   </div>
 </div>
 <style>
-  #result button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
+  #result button, #shareCard button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
     background: rgba(11,14,18,.6); color: #d8c9a3; border: 1px solid #6b5a3a; border-radius: 4px; cursor: pointer; }
-  #result button:hover { border-color: #c9b787; }
+  #result button:hover, #shareCard button:hover { border-color: #c9b787; }
   .rs-new { display: inline-block; animation: rsPop 0.6s cubic-bezier(.2,1.6,.4,1) both; }
   @keyframes rsPop { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 </style>
@@ -192,7 +201,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.17.0';
+const APP_VER = 'v0.18.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1992,6 +2001,38 @@ function drawDebug() {
 // 免费版官印「無絃琴」朱印随视频落款;付费去印/自定义雅号印 → 接内购后置 true
 const sealImg = new Image();
 sealImg.src = 'icons/icon-192.png';
+// 片尾品牌帧:朱砂四字印「無絃琴印」(右上→右下→左上→左下)+ 名号 + 网址。
+// 看到分享视频的人由此知道出处——水印获客的闭环终点
+function drawRecOutro(now) {
+  const a = Math.min(1, (now - (recOutro.until - 2400)) / 450);
+  const u = dpr(), cx = W / 2, cy = H / 2;
+  ctx2d.globalAlpha = a;
+  ctx2d.fillStyle = '#0b0e12';
+  ctx2d.fillRect(0, 0, W, H);
+  const ss = Math.min(W, H) * 0.30;
+  const sx = cx - ss / 2, sy = cy - ss - 26 * u;
+  ctx2d.fillStyle = '#9e2b25';
+  ctx2d.beginPath(); rrect(sx, sy, ss, ss, ss * 0.06); ctx2d.fill();
+  ctx2d.fillStyle = '#f3e6cf';
+  ctx2d.textAlign = 'center';
+  ctx2d.font = `${ss * 0.34}px ${JZ_FONT}`;
+  const q = ss * 0.24;
+  ctx2d.fillText('無', cx + q, sy + ss * 0.42);   // 印文右起竖读
+  ctx2d.fillText('絃', cx + q, sy + ss * 0.88);
+  ctx2d.fillText('琴', cx - q, sy + ss * 0.42);
+  ctx2d.fillText('印', cx - q, sy + ss * 0.88);
+  ctx2d.fillStyle = '#e8dcc0';
+  ctx2d.font = `${30 * u}px ${JZ_FONT}`;
+  ctx2d.fillText('無 絃 琴', cx, cy + 30 * u);
+  ctx2d.fillStyle = '#9a8f74';
+  ctx2d.font = `${14 * u}px ${JZ_FONT}`;
+  ctx2d.fillText('凌空抚琴 · 以身为琴', cx, cy + 58 * u);
+  ctx2d.fillStyle = '#c9b787';
+  ctx2d.font = `${13 * u}px serif`;
+  ctx2d.fillText('jeonshoeck.com/wuxianqin', cx, cy + 84 * u);
+  ctx2d.globalAlpha = 1;
+}
+
 function drawSeal() {
   if (!recorder) return;
   // 白身:官印「無絃琴」+logo;知音:自定义雅号印(未刻则不落印)——落款即身份
@@ -2113,6 +2154,7 @@ function draw(now) {
     }
   }
   drawSeal();   // 录制落款:干净模式也保留(水印即落款)
+  if (recOutro) drawRecOutro(now);   // 片尾品牌帧盖顶(录制流会收入此画面)
 
   const hud = document.getElementById('hud');
   const track = modelOn && cameraOn;
@@ -2146,8 +2188,43 @@ function loop(ts) {
 
 // ---------- 录制(画布+合成音频 → webm/mp4 下载) ----------
 let recorder = null, recChunks = [], recTimerId = null, recStart = 0, recDisplay = null;
+let recOutro = null;   // 片尾品牌帧进行中:{until} — 停录先展 2.4s 片尾,余音随之收入片尾
+let lastRec = null;    // 最近一次成片 {blob,name,mp4,file},分享卡取用
+// 录完即分享:系统分享面板直达微信/相册;不支持 share files 的环境只留保存。
+// 传播闭环的另一半在片尾品牌帧(drawRecOutro):看片的人知道这是什么、去哪玩
+function showShareCard() {
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [lastRec.file] }));
+  document.getElementById('shInfo').textContent =
+    `${(lastRec.blob.size / 1048576).toFixed(1)} MB` + (lastRec.mp4 ? ' · 微信可直接发' : ' · webm 格式') +
+    (canShare ? '' : ' · 此浏览器仅支持保存');
+  document.getElementById('shShare').style.display = canShare ? '' : 'none';
+  document.getElementById('shareCard').style.display = 'flex';
+}
+document.getElementById('shShare').addEventListener('click', async () => {
+  try {
+    await navigator.share({ files: [lastRec.file], title: '無絃琴',
+      text: '凌空一曲,以身为琴 · 無絃琴 jeonshoeck.com/wuxianqin' });
+  } catch (e) { /* 用户取消分享面板,不作数 */ }
+});
+document.getElementById('shSave').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(lastRec.blob);
+  a.download = lastRec.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+});
+document.getElementById('shClose').addEventListener('click', () => {
+  document.getElementById('shareCard').style.display = 'none';
+});
+
 async function toggleRecord() {
-  if (recorder) { recorder.stop(); return; }
+  if (recorder) {
+    if (recOutro) return;   // 片尾进行中,勿重复触发
+    // 片尾品牌帧:画布再录 2.4s(朱印+名号+网址),弦音余韵自然收入片尾
+    recOutro = { until: performance.now() + 2400 };
+    setTimeout(() => { if (recorder) recorder.stop(); }, 2450);
+    return;
+  }
   // 含提示=全界面录制:标签页屏幕捕获(含顶部控件等 DOM),浏览器要求弹一次画面选择;
   // 取消选择或不支持时退回画布录制。关闭含提示=只录琴面(干净模式),无弹框。
   let videoTracks = null;
@@ -2162,7 +2239,7 @@ async function toggleRecord() {
       });
       videoTracks = recDisplay.getVideoTracks();
       // 用户点浏览器自带的「停止共享」时,同步收尾录制
-      videoTracks[0].onended = () => { if (recorder) recorder.stop(); };
+      videoTracks[0].onended = () => { if (recorder) { recOutro = null; recorder.stop(); } };
     } catch (e) {
       console.warn('[rec] 屏幕捕获未授权,退回画布录制(不含顶部控件)', e.name);
     }
@@ -2185,15 +2262,14 @@ async function toggleRecord() {
   rec.onstop = () => {
     const type = rec.mimeType || 'video/webm';
     const blob = new Blob(recChunks, { type });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.download = `无弦琴-${stamp}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
-    a.click();
-    console.log('[rec] 已保存', (blob.size / 1024 / 1024).toFixed(2) + 'MB', type);
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    const name = `无弦琴-${stamp}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
+    lastRec = { blob, name, mp4: type.includes('mp4'),
+      file: new File([blob], name, { type }) };
+    console.log('[rec] 成片', (blob.size / 1024 / 1024).toFixed(2) + 'MB', type);
+    showShareCard();
     if (recDisplay) { recDisplay.getTracks().forEach(t => t.stop()); recDisplay = null; }
-    recorder = null;
+    recorder = null; recOutro = null;
     clearInterval(recTimerId);
     recBtn.textContent = '⏺ 录制';
     recBtn.classList.remove('rec');
