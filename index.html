@@ -155,6 +155,12 @@
   .mp-foot span { cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
   @keyframes mpPulse { 0% { box-shadow:0 0 0 0 rgba(232,192,76,.55); } 100% { box-shadow:0 0 0 9px rgba(232,192,76,0); } }
 </style>
+<div id="dailyToast" style="display:none; position:fixed; top:15%; left:50%; transform:translateX(-50%); z-index:6; background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:14px 22px; text-align:center; transition:opacity .6s">
+  <div style="font-size:15px; color:#d8c9a3; letter-spacing:2px; margin-bottom:4px">每日一句</div>
+  <div id="dtLine" style="font-size:12px; color:#9a8f74; margin-bottom:10px"></div>
+  <button id="dtGo">去练一句</button>
+  <span id="dtLater" style="margin-left:12px; font-size:12px; color:#9a8f74; cursor:pointer; text-decoration:underline; text-underline-offset:3px">稍后</span>
+</div>
 <div id="shareCard" style="display:none; position:fixed; inset:0; z-index:9; background:rgba(5,7,10,.55); align-items:center; justify-content:center">
   <div style="background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:24px 32px; text-align:center; min-width:252px">
     <div style="font-size:17px; color:#d8c9a3; margin-bottom:6px">琴音已录成</div>
@@ -174,9 +180,12 @@
   </div>
 </div>
 <style>
-  #result button, #shareCard button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
+  #result button, #shareCard button, #dailyToast button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
     background: rgba(11,14,18,.6); color: #d8c9a3; border: 1px solid #6b5a3a; border-radius: 4px; cursor: pointer; }
-  #result button:hover, #shareCard button:hover { border-color: #c9b787; }
+  #result button:hover, #shareCard button:hover, #dailyToast button:hover { border-color: #c9b787; }
+  #mapBtn { position: relative; }
+  #mapBtn.dot::after { content: ''; position: absolute; top: -3px; right: -3px;
+    width: 7px; height: 7px; border-radius: 50%; background: #c94f3d; }
   .rs-new { display: inline-block; animation: rsPop 0.6s cubic-bezier(.2,1.6,.4,1) both; }
   @keyframes rsPop { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 </style>
@@ -201,7 +210,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.18.0';
+const APP_VER = 'v0.19.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -211,6 +220,20 @@ const APP_VER = 'v0.18.0';
   if (t === 'zhiyin' || t === 'free') localStorage.setItem('qin.tier', t);
 }
 const ENT = { get zhiyin() { return localStorage.getItem('qin.tier') === 'zhiyin'; } };
+
+// 轻量埋点:本地计数(qin.stats),不外发任何数据;「报告」一键分享时随行——
+// 静态托管无采集端,这是当下诚实的漏斗观测法(将来 App 版可换信标)
+let statsMem = null, statsDirty = false;
+function stat(k, n = 1) {
+  try {
+    if (!statsMem) statsMem = JSON.parse(localStorage.getItem('qin.stats') || '{}');
+  } catch (e) { statsMem = {}; }
+  statsMem[k] = (statsMem[k] || 0) + n; statsDirty = true;
+}
+setInterval(() => {
+  if (statsDirty && statsMem) { localStorage.setItem('qin.stats', JSON.stringify(statsMem)); statsDirty = false; }
+}, 5000);
+window.addEventListener('pagehide', () => { if (statsMem) localStorage.setItem('qin.stats', JSON.stringify(statsMem)); });
 const sealName = () => (localStorage.getItem('qin.sealName') || '').trim().slice(0, 4);
 const verBase = '無絃琴 ' + APP_VER + (ENT.zhiyin ? ' · 知音' : '');
 document.getElementById('ver').textContent = verBase;
@@ -582,6 +605,7 @@ function pluck(i, amp, freq, opts = {}) {
   s.pressX = opts.pressX ?? null;
   s.pressLabel = opts.label || '';
   lastGlobalPluckT = now; lastAmp = amp;
+  stat('pluck');
   setStringFreq(i, freq);
   if (masterReady) {
     const node = stringNodes[i];
@@ -1022,6 +1046,7 @@ const PRAISE = {
 const PREVIEW_N = 6;   // 白身试奏锁定曲的音数(一句)
 function gameSet(key) {
   if (!key) { game = null; return; }
+  stat('song_start');
   if (key === 'daily') {
     // 每日一句:按日期从锁定曲库确定性取一句(8 音),白身可完整弹——试吃+打卡
     const locked = Object.keys(SCORES).filter(k => !SCORES[k].free);
@@ -1086,7 +1111,7 @@ function judgeNote(i, opts) {
     game.lastWasMiss = false;
     game.idx++;
     if (game.idx >= game.notes.length) game.doneT = now;
-    else if (game.preview && game.idx >= PREVIEW_N) { game.doneT = now; game.previewEnd = true; }
+    else if (game.preview && game.idx >= PREVIEW_N) { game.doneT = now; game.previewEnd = true; stat('paywall_hit'); }
     if (game.doneT && game.daily && !game.streakDone) {   // 每日一句:连续打卡
       game.streakDone = true;
       const day = Math.floor(Date.now() / 86400000);
@@ -1098,6 +1123,8 @@ function judgeNote(i, opts) {
         localStorage.setItem('qin.streak', streak);
       }
       game.streakN = streak || 1;
+      stat('daily_done');
+      updateDailyDot();
     }
   } else {
     game.miss++; game.hint = hint; game.hintT = now;
@@ -1135,6 +1162,38 @@ function heartPose() {
   if (c.x < W * 0.32 || c.x > W * 0.68) return null;
   return c;
 }
+
+// ---------- 每日一句 · 门口迎接:回访者入席即迎,不挡新人开指 ----------
+// 习惯钩子第一原则:在门口等,不在菜单里藏。连续日在险(昨日刚打卡)时点破利害
+let dailyToastT = 0;
+function dailyDoneToday() { return +localStorage.getItem('qin.dailyDay') === Math.floor(Date.now() / 86400000); }
+function updateDailyDot() {
+  document.getElementById('mapBtn').classList.toggle('dot', !dailyDoneToday());
+}
+function dailyGreet() {
+  if (dailyDoneToday()) return;
+  const day = Math.floor(Date.now() / 86400000);
+  const last = +localStorage.getItem('qin.dailyDay') || 0;
+  const streak = +localStorage.getItem('qin.streak') || 0;
+  document.getElementById('dtLine').textContent =
+    (day - last === 1 && streak) ? `连续 ${streak} 日,别断在今天` : '一句琴,攒一串日子';
+  const el = document.getElementById('dailyToast');
+  el.style.display = 'block'; el.style.opacity = '1';
+  dailyToastT = setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => { el.style.display = 'none'; }, 700);
+  }, 10000);
+}
+function dailyToastHide() {
+  clearTimeout(dailyToastT);
+  document.getElementById('dailyToast').style.display = 'none';
+}
+document.getElementById('dtGo').addEventListener('click', () => {
+  stat('daily_go');
+  dailyToastHide();
+  scoreSel.value = 'daily'; gameSet('daily');
+});
+document.getElementById('dtLater').addEventListener('click', dailyToastHide);
 
 // ---------- 章节地图(琴谱卷轴):目录即旅程,星标即成就,锁卷即橱窗 ----------
 // 四卷分章;不设人为关卡锁(乐器自由是底线),地图只做三件事:
@@ -1174,7 +1233,7 @@ function mapBuild() {
       }).join('') + '</div></div>';
   }).join('');
 }
-function mapOpen() { mapBuild(); mapEl.style.display = 'block'; }
+function mapOpen() { stat('map_open'); mapBuild(); mapEl.style.display = 'block'; }
 function mapClose() { mapEl.style.display = 'none'; }
 document.getElementById('mapBtn').addEventListener('click', mapOpen);
 document.getElementById('mapCloseX').addEventListener('click', mapClose);
@@ -1216,6 +1275,7 @@ function settle() {
   if (acc >= 0.8) s |= 2;
   if (game.miss === 0 && !skips) s |= 4;
   if (game.miss === 0 && !skips && game.blindRun) s |= 8;
+  stat('song_done');
   const prog = progLoad();
   const pv = prog[game.key] || { s: 0, acc: 0, n: 0 };
   const nb = s & ~pv.s;   // 本次新收的星
@@ -1259,6 +1319,7 @@ const ftue = { active: false, step: 0, celebT: -1e9, celebText: '',
   cnt: 0, strs: new Set(), fistT: 0, slideN: 0, lastF: 0, finaleT: 0 };
 const ftueSkipBtn = document.getElementById('ftueSkip');
 function ftueStart() {
+  stat('ftue_start');
   ftue.active = true; ftue.step = 0; ftue.cnt = 0; ftue.strs.clear();
   ftue.fistT = 0; ftue.slideN = 0; ftue.finaleT = 0; ftue.celebT = -1e9;
   gameSet(''); scoreSel.value = '';
@@ -1276,6 +1337,7 @@ function ftueAdvance(txt) {
   if (ftue.step >= 7) ftueFinish();
 }
 function ftueFinish() {
+  stat('ftue_done');
   ftue.active = false; ftue.finaleT = performance.now();
   localStorage.setItem('qin.ftueDone', '1');
   const seals = (localStorage.getItem('qin.seals') || '').split(',').filter(Boolean);
@@ -1362,7 +1424,7 @@ function drawFtue(now) {
     ctx2d.fillText(ftue.celebText, cx, ty + 38 * u);
   }
 }
-ftueSkipBtn.addEventListener('click', () => ftueAdvance());
+ftueSkipBtn.addEventListener('click', () => { stat('ftue_skip'); ftueAdvance(); });
 
 function trackRecGesture() {
   const now = performance.now();
@@ -2201,12 +2263,14 @@ function showShareCard() {
   document.getElementById('shareCard').style.display = 'flex';
 }
 document.getElementById('shShare').addEventListener('click', async () => {
+  stat('share_tap');
   try {
     await navigator.share({ files: [lastRec.file], title: '無絃琴',
       text: '凌空一曲,以身为琴 · 無絃琴 jeonshoeck.com/wuxianqin' });
   } catch (e) { /* 用户取消分享面板,不作数 */ }
 });
 document.getElementById('shSave').addEventListener('click', () => {
+  stat('save_tap');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(lastRec.blob);
   a.download = lastRec.name;
@@ -2267,6 +2331,7 @@ async function toggleRecord() {
     lastRec = { blob, name, mp4: type.includes('mp4'),
       file: new File([blob], name, { type }) };
     console.log('[rec] 成片', (blob.size / 1024 / 1024).toFixed(2) + 'MB', type);
+    stat('rec_done');
     showShareCard();
     if (recDisplay) { recDisplay.getTracks().forEach(t => t.stop()); recDisplay = null; }
     recorder = null; recOutro = null;
@@ -2275,6 +2340,7 @@ async function toggleRecord() {
     recBtn.classList.remove('rec');
   };
   rec.start(250);
+  stat('rec_start');
   recorder = rec;
   recStart = performance.now();
   recBtn.classList.add('rec');
@@ -2296,6 +2362,7 @@ function buildReport() {
     `延迟≈${(camPart + perfM.infer + audioLat) | 0}ms = 摄像${camPart | 0}${perfM.camLag ? '' : '(估)'} + 推理${perfM.infer.toFixed(1)} + 音频${audioLat | 0}`,
     `帧距 ${perfM.frameDt.toFixed(0)}ms (${(1000 / perfM.frameDt).toFixed(0)}fps)`,
     `近10秒拨速峰值 ${vnPeak.v.toFixed(3)} (阈值 0.055)`,
+    `漏斗 ${JSON.stringify(statsMem || JSON.parse(localStorage.getItem('qin.stats') || '{}'))}`,
     introState,
     `UA ${navigator.userAgent.slice(0, 90)}`,
   ].join('\n');
@@ -2472,7 +2539,10 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   document.getElementById('controls').style.display = 'flex';
   document.getElementById('tips').style.display = 'block';
   requestAnimationFrame(loop);
+  stat('open');
+  updateDailyDot();
   if (!localStorage.getItem('qin.ftueDone')) ftueStart();
+  else setTimeout(dailyGreet, 1500);   // 门口迎接:琴面先立稳,再递上今日一句
 });
 
 // PWA:注册 Service Worker(轻量壳预缓存;失败静默)。
