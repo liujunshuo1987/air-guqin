@@ -140,7 +140,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.14.1';
+const APP_VER = 'v0.14.2';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1062,7 +1062,11 @@ function heartPose() {
   if (Math.hypot(ia.x - ib.x, ia.y - ib.y) > s2 * 0.9) return null;
   if (Math.hypot(ta.x - tb.x, ta.y - tb.y) > s2 * 0.9) return null;
   if ((ta.y + tb.y) / 2 - (ia.y + ib.y) / 2 < s2 * 0.35) return null;
-  return { x: (ia.x + ib.x + ta.x + tb.x) / 4, y: (ia.y + ib.y + ta.y + tb.y) / 4 };
+  const c = { x: (ia.x + ib.x + ta.x + tb.x) / 4, y: (ia.y + ib.y + ta.y + tb.y) / 4 };
+  // 仅屏幕中间区域生效(用户定):按一徽等近岳山处双手凑近曾被误读为比心;
+  // 刻意比心天然在胸前正中,演奏则在琴弦两端工作区——空间分区切开两个语义
+  if (c.x < W * 0.32 || c.x > W * 0.68) return null;
+  return c;
 }
 
 function trackRecGesture() {
