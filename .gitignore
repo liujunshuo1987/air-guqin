@@ -1,3 +1,5 @@
 .DS_Store
 采样/
 tmp*.mp4
+node_modules/
+www/

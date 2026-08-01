@@ -1,0 +1,12 @@
+{
+  "appId": "com.jeonshoeck.wuxianqin",
+  "appName": "無絃琴",
+  "webDir": "www",
+  "server": {
+    "iosScheme": "https"
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0b0e12"
+  }
+}

@@ -174,8 +174,15 @@
     <div class="zy-item"><b>金玉之声</b><span>真琴采样音色层(录制中),上线即启,不另收费</span></div>
     <div style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · ¥45 · 永久</div>
     <div id="zyStatus" style="font-size:12px; color:#9a8f74; margin-bottom:24px; line-height:1.8"></div>
+    <button id="zyBuy" style="display:none">成为知音 · ¥45</button>
+    <button id="zyRestore" style="display:none; font-size:12px">恢复购买</button>
     <button id="zySeal" style="display:none">刻我的雅号印</button>
     <button id="zyClose">回琴</button>
+    <div style="margin-top:28px; font-size:11px">
+      <a href="https://jeonshoeck.com/wuxianqin/privacy" target="_blank" rel="noopener" style="color:#7a6f54">隐私政策</a>
+      <span style="color:#5a5344">&ensp;·&ensp;</span>
+      <a href="https://jeonshoeck.com/wuxianqin/terms" target="_blank" rel="noopener" style="color:#7a6f54">用户协议</a>
+    </div>
   </div>
 </div>
 <div id="dailyToast" style="display:none; position:fixed; top:15%; left:50%; transform:translateX(-50%); z-index:6; background:#12161c; border:1px solid #6b5a3a; border-radius:8px; padding:14px 22px; text-align:center; transition:opacity .6s">
@@ -238,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.20.1';
+const APP_VER = 'v0.21.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1196,14 +1203,55 @@ function heartPose() {
 // ---------- 知音介绍页:付费墙的着陆点(施工序⑦) ----------
 // 三个入口:试奏截停转化卡 / 地图锁定卷章头 / 卷轴页脚。IAP 未上线前诚实占位:
 // 网页版以试奏相赠,解锁待 App Store 版——付费统一走 IAP(定价与权益勿在此页外另说)
+// IAP 桥:仅在 Capacitor 原生壳内生效(StoreKit 经 cordova-plugin-purchase);
+// 网页版守卫到底不见购买。无服务器权益架构:交易由 Apple 处理与核验,
+// 本机凭成交落 qin.tier——数据治理承诺"我们不接触支付信息"的技术兑现
+const IAP_PRODUCT = 'com.jeonshoeck.wuxianqin.zhiyin';
+const isNativeApp = () =>
+  !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+let iapReady = false;
+function iapGrant() {
+  localStorage.setItem('qin.tier', 'zhiyin');
+  refreshScoreOpts();
+  sealBtn.style.display = '';
+  statusNote = '❖ 知音已开启,谢谢相知';
+  if (document.getElementById('zyPage').style.display !== 'none') zyOpen();
+}
+function iapInit() {
+  if (iapReady || !isNativeApp() || !window.CdvPurchase) return;
+  iapReady = true;
+  const { store, ProductType, Platform } = window.CdvPurchase;
+  store.register([{ id: IAP_PRODUCT, type: ProductType.NON_CONSUMABLE, platform: Platform.APPLE_APPSTORE }]);
+  store.when().approved(tr => tr.finish());
+  store.when().finished(tr => { if (tr.products.some(p => p.id === IAP_PRODUCT)) iapGrant(); });
+  store.initialize([Platform.APPLE_APPSTORE]);
+}
+document.addEventListener('deviceready', iapInit);
 function zyOpen() {
   stat('zy_view');
+  iapInit();
+  const native = isNativeApp();
   document.getElementById('zyStatus').innerHTML = ENT.zhiyin
     ? '✓ 你已是知音,谢谢你的相知'
-    : '解锁在 App Store 版 · 即将上线<br>网页版以试奏相赠,先弹为敬';
+    : native
+      ? '一次买断,权益随你的 Apple ID<br>换机不失,恢复购买即回'
+      : '解锁在 App Store 版 · 即将上线<br>网页版以试奏相赠,先弹为敬';
   document.getElementById('zySeal').style.display = ENT.zhiyin ? '' : 'none';
+  document.getElementById('zyBuy').style.display = native && !ENT.zhiyin ? '' : 'none';
+  document.getElementById('zyRestore').style.display = native && !ENT.zhiyin ? '' : 'none';
   document.getElementById('zyPage').style.display = 'block';
 }
+document.getElementById('zyBuy').addEventListener('click', () => {
+  stat('zy_buy_tap');
+  const p = window.CdvPurchase && window.CdvPurchase.store.get(IAP_PRODUCT);
+  const offer = p && p.getOffer();
+  if (offer) offer.order();
+  else statusNote = '⚠ 商店暂不可达,稍后再试';
+});
+document.getElementById('zyRestore').addEventListener('click', () => {
+  stat('zy_restore_tap');
+  if (window.CdvPurchase) window.CdvPurchase.store.restorePurchases();
+});
 document.getElementById('zyClose').addEventListener('click', () => {
   document.getElementById('zyPage').style.display = 'none';
 });
