@@ -80,17 +80,9 @@
   <div class="scrim"></div>
   <h1 class="ov-item">无 弦 琴</h1>
   <div id="motto" class="ov-item">「但识琴中趣,何劳弦上声」 · 陶渊明</div>
-  <p class="ov-item">七弦十三徽,布于镜前空中。弦横陈、琴面立起朝人;岳山在右,徽位向左。<br>
-     入席后<b>双手左右平举、静止片刻</b>即「定琴」——琴随身而落,远近大小自适应,<br>
-     此后不必紧盯屏幕,凭肌肉记忆即可盲弹;经过徽位有轻微提示音助校准。<br>
-     两手以站位分工:<b>靠岳山(右)侧的手司拨弦</b>,另一只司按弦。<br>
-     拨弦手<b>伸指划过</b>琴弦即响(下扫=滚拂),力度随手速;<b>握拳移动</b>可跨弦换位而不发声;<br>
-     按弦手<b>点指</b>(伸食指、收其余)按住<b>指下那根弦</b>的徽位,他弦仍是散音;<br>
-     左右移动=走手音,拇食<b>捏合</b>=泛音;<br>
-     <b>松开手掌</b>悬停或垂手=散音(搭手不改音高),按弦手<b>握拳</b>=煞止余音。<br>
-     <span style="color:#7d8a6a">右上角可切「琴桌·拟真」分区布局,可录制 MP4 演奏视频;<br>
-     若左右手被认反(部分摄像头信号已预翻转),切换右上角「镜像」即可。<br>
-     (需摄像头与联网加载手部模型;无摄像头可鼠标点弦/拖动,Shift+点=泛音,键盘 1–7 散音)</span></p>
+  <p class="ov-item">七弦十三徽,布于镜前空中。凌空一挥,琴自会应你。<br>
+     <span style="color:#7d8a6a">需要摄像头;首次入席有「开指」引导,两分钟上手。<br>
+     左右手认反时切右上角「镜像」;无摄像头可鼠标点弦、键盘 1–7 试音。</span></p>
   <button id="startBtn" class="ov-item">入 席 抚 琴</button>
   <div id="ovStatus" class="ov-item"></div>
   <div id="ver" class="ov-item" style="color:#5a5340; font-size:11px; letter-spacing:1px;"></div>
@@ -106,6 +98,7 @@
   <select id="scoreSel">
     <option value="" selected>自由弹奏</option>
     <option value="daily">每日一句 · 试千曲</option>
+    <option value="ftue">开指引导 · 新手</option>
     <option value="practice">0 入门 · 散按泛</option>
     <option value="xingxing">1 小星星 · 移植</option>
     <option value="laohu">2 两只老虎 · 移植</option>
@@ -131,6 +124,7 @@
   <button id="recBtn">⏺ 录制</button>
 </div>
 <div id="tips"></div>
+<button id="ftueSkip" style="display:none; position:fixed; right:12px; bottom:110px; z-index:6; font-family:inherit; font-size:12px; padding:4px 10px; background:rgba(11,14,18,.6); color:#9a8f74; border:1px solid #6b5a3a; border-radius:3px; cursor:pointer">跳过此步</button>
 
 <script type="module">
 /* ============================================================
@@ -140,7 +134,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.14.2';
+const APP_VER = 'v0.15.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -450,6 +444,7 @@ function setStringFreq(i, freq) {
 // 依用户决定移除:空气之琴无指与弦的肉身摩擦,余韵 + 手走音移已是韵味所在
 function slideTo(i, freq) {
   setStringFreq(i, freq);
+  ftueOnSlide(freq);
 }
 
 // ---------- 泛音采样音源层(samples/fan/N.{wav,m4a,mp3} = N 弦七徽泛音) ----------
@@ -527,7 +522,7 @@ function pluck(i, amp, freq, opts = {}) {
       // 真琴采样优先;轻触节点按灭该弦原有振动(真琴物理),下次拨弦自复位
       playFanSample(i, freq * octMul(), amp, opts.when);
       node.parameters.get('t60').value = 0.12;
-      if (!opts.noJudge) judgeNote(i, opts);
+      if (!opts.noJudge) { judgeNote(i, opts); ftueOnPluck(i, opts); }
       console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label}(采样)`);
       return;
     }
@@ -542,7 +537,7 @@ function pluck(i, amp, freq, opts = {}) {
       : 0.12;
     node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos, when: opts.when || 0 });
   }
-  if (!opts.noJudge) judgeNote(i, opts);
+  if (!opts.noJudge) { judgeNote(i, opts); ftueOnPluck(i, opts); }
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
 }
 
@@ -865,6 +860,10 @@ const P = (spec, ly) => spec.map(([s, t, h], i) => ({ s, t, h, ly: ly && ly[i] !
 // 曲库:1-2 几乎全散音 → 3 散按对答 → 4-6 多按位 → 7 泛音专项 → 8-10 意临古曲
 // 「移植」=旋律照原曲;「意临」=无法逐音打谱的古曲,取其调式织体气韵的致意改编
 const SCORES = {
+  // 开指引导第七步的毕业小谱:仙翁操第一句(散按各半,新手已逐技能解锁)
+  ftue: { free: true, name: '开指 · 第一句仙翁', notes: [
+    ...P([[3,'a',8],[6,'s']], '仙翁'), ...P([[3,'a',8],[6,'s']], '仙翁'),
+  ] },
   practice: { free: true, name: '入门 · 散按泛', notes: [
     ...P([[1,'s'],[2,'s'],[3,'s'],[4,'s'],[5,'s'],[6,'s'],[7,'s']]),
     ...P([[4,'a',6],[4,'a',8],[5,'a',6]]),
@@ -1068,6 +1067,126 @@ function heartPose() {
   if (c.x < W * 0.32 || c.x > W * 0.68) return null;
   return c;
 }
+
+// ---------- 开指引导(FTUE):零阅读,做一个动作→琴给一个反应→庆祝 ----------
+// 七步:挥手出声→换弦再拨→握拳静默→点指按音→走手音→泛音→跟谱一句仙翁;
+// 终点发第一枚印「开指」(qin.seals,未来印谱册的第一页)。可跳过、可重修
+const FTUE_STEPS = [
+  { text: '抬起手,朝任意一根琴弦挥一下' },
+  { text: '好!再拨两声,换不同的弦试试' },
+  { text: '握拳,慢慢穿过琴弦——合上的手指不碰弦' },
+  { text: '另一只手竖起食指点住一根弦,再拨这根弦——按音' },
+  { text: '点指按着别松,左右缓缓滑动——走手音' },
+  { text: '拇指食指轻捏,悬停在弦上,另一只手拨它——泛音' },
+  { text: '最后,跟着头顶的减字牌,弹出你的第一句《仙翁操》' },
+];
+const ftue = { active: false, step: 0, celebT: -1e9, celebText: '',
+  cnt: 0, strs: new Set(), fistT: 0, slideN: 0, lastF: 0, finaleT: 0 };
+const ftueSkipBtn = document.getElementById('ftueSkip');
+function ftueStart() {
+  ftue.active = true; ftue.step = 0; ftue.cnt = 0; ftue.strs.clear();
+  ftue.fistT = 0; ftue.slideN = 0; ftue.finaleT = 0; ftue.celebT = -1e9;
+  gameSet(''); scoreSel.value = '';
+  ftueSkipBtn.style.display = '';
+  document.getElementById('tips').style.display = 'none';
+}
+function ftueCelebrate(txt) {
+  ftue.celebT = performance.now(); ftue.celebText = txt;
+  beep(1046, 0.18, 0.05);
+}
+function ftueAdvance(txt) {
+  if (txt) ftueCelebrate(txt);
+  ftue.step++; ftue.cnt = 0; ftue.strs.clear(); ftue.fistT = 0; ftue.slideN = 0;
+  if (ftue.step === 6) gameSet('ftue');
+  if (ftue.step >= 7) ftueFinish();
+}
+function ftueFinish() {
+  ftue.active = false; ftue.finaleT = performance.now();
+  localStorage.setItem('qin.ftueDone', '1');
+  const seals = (localStorage.getItem('qin.seals') || '').split(',').filter(Boolean);
+  if (!seals.includes('开指')) { seals.push('开指'); localStorage.setItem('qin.seals', seals.join(',')); }
+  gameSet(''); scoreSel.value = '';
+  ftueSkipBtn.style.display = 'none';
+  document.getElementById('tips').style.display = 'block';
+  beep(660, 0.25, 0.05); setTimeout(() => beep(880, 0.25, 0.05), 180); setTimeout(() => beep(1320, 0.4, 0.06), 360);
+}
+function ftueOnPluck(i, opts) {
+  if (!ftue.active) return;
+  if (ftue.step === 0) ftueAdvance('琴响了——这就是无弦之琴');
+  else if (ftue.step === 1) {
+    ftue.strs.add(i);
+    if (++ftue.cnt >= 2 && ftue.strs.size >= 2) ftueAdvance('七弦皆应你');
+  } else if (ftue.step === 3) {
+    if (opts.pressF != null) ftueAdvance('按音既出,徽位就在指下');
+  } else if (ftue.step === 5) {
+    if (opts.harmonic) ftueAdvance('金玉之声——泛音');
+  }
+}
+function ftueOnSlide(freq) {
+  if (!ftue.active || ftue.step !== 4) return;
+  if (Math.abs(freq - ftue.lastF) > 1.5) { ftue.lastF = freq; if (++ftue.slideN >= 10) ftueAdvance('走手音,古琴之魂'); }
+}
+function ftueTick(now) {
+  if (!ftue.active) return;
+  if (ftue.step === 2) {
+    const fist = curHands.find(h => h.extRaw === 0 && !h.pinch);
+    if (fist) { if (!ftue.fistT) ftue.fistT = now; if (now - ftue.fistT > 800) ftueAdvance('握拳过弦,寂然无声'); }
+    else ftue.fistT = 0;
+  } else if (ftue.step === 6) {
+    if (!game || game.key !== 'ftue') gameSet('ftue');   // 引导中被切谱,拉回小谱
+    else if (game.doneT) ftueAdvance();
+  }
+}
+function drawFtue(now) {
+  const u = dpr(), cx = W / 2;
+  if (!ftue.active) {
+    // 终礼:「开指」朱印入谱(5.5s)
+    if (!ftue.finaleT || now - ftue.finaleT > 5500) return;
+    const y0 = H * 0.30;
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = '#e8dcc0';
+    ctx2d.font = `${30 * u}px ${JZ_FONT}`;
+    ctx2d.fillText('开指 · 礼成', cx, y0);
+    const ss = 58 * u, sx = cx - ss / 2, sy = y0 + 18 * u;
+    ctx2d.fillStyle = '#9e2b25';
+    ctx2d.beginPath(); rrect(sx, sy, ss, ss, 6 * u); ctx2d.fill();
+    ctx2d.fillStyle = '#f3e6cf';
+    ctx2d.font = `${ss * 0.42}px ${JZ_FONT}`;
+    ctx2d.fillText('开', cx, sy + ss * 0.40);
+    ctx2d.fillText('指', cx, sy + ss * 0.82);
+    ctx2d.fillStyle = '#9a8f74';
+    ctx2d.font = `${15 * u}px ${JZ_FONT}`;
+    ctx2d.fillText('第一枚印入谱 · 曲库与每日一句已为你打开', cx, sy + ss + 26 * u);
+    return;
+  }
+  // 引导横幅锚在 HUD 之下、弦带之上(0.20H);第七步整体让位给减字牌,
+  // 只留弦带之下的瞬时庆祝语——屏幕窄高各异,躲开 DOM 覆盖层最稳
+  ctx2d.textAlign = 'center';
+  if (ftue.step === 6) {
+    if (now - ftue.celebT < 1500) {
+      ctx2d.fillStyle = '#8fe0a8';
+      ctx2d.font = `${16 * u}px ${JZ_FONT}`;
+      ctx2d.fillText(ftue.celebText, cx, H * 0.78);
+    }
+    return;
+  }
+  const ty = H * 0.20;
+  ctx2d.fillStyle = '#e8dcc0';
+  ctx2d.font = `${21 * u}px ${JZ_FONT}`;
+  ctx2d.fillText(FTUE_STEPS[ftue.step].text, cx, ty);
+  for (let i = 0; i < FTUE_STEPS.length; i++) {
+    ctx2d.fillStyle = i < ftue.step ? '#c9b787' : i === ftue.step ? '#e8dcc0' : 'rgba(200,200,200,0.25)';
+    ctx2d.beginPath();
+    ctx2d.arc(cx + (i - 3) * 16 * u, ty + 15 * u, 3.5 * u, 0, 7);
+    ctx2d.fill();
+  }
+  if (now - ftue.celebT < 1500) {
+    ctx2d.fillStyle = '#8fe0a8';
+    ctx2d.font = `${16 * u}px ${JZ_FONT}`;
+    ctx2d.fillText(ftue.celebText, cx, ty + 38 * u);
+  }
+}
+ftueSkipBtn.addEventListener('click', () => ftueAdvance());
 
 function trackRecGesture() {
   const now = performance.now();
@@ -1752,7 +1871,8 @@ function draw(now) {
   ctx2d.clearRect(0, 0, W, H);
   drawCamera();
   drawHorizontal(now, mode === 'f', clean);
-  if (!clean) drawGame(now);
+  ftueTick(now);   // 引导状态机挂 rAF(鼠标模式无摄像帧也要走)
+  if (!clean) { drawGame(now); drawFtue(now); }
 
   // OK 手势进度环(录制开关)/ 3-2-1 倒计时大字
   if (!clean && heartHoldP > 0 && heartPos) {
@@ -1964,7 +2084,10 @@ modeSel.addEventListener('change', () => applyMode(modeSel.value));
 applyMode('f');
 
 const scoreSel = document.getElementById('scoreSel');
-scoreSel.addEventListener('change', () => gameSet(scoreSel.value));
+scoreSel.addEventListener('change', () => {
+  if (scoreSel.value === 'ftue') ftueStart();
+  else gameSet(scoreSel.value);
+});
 // 白身视角:锁定曲带 🔒(仍可试奏一句——付费时机放在动机峰值,不藏内容目录)
 for (const opt of scoreSel.options) {
   const m = SCORES[opt.value];
@@ -2102,6 +2225,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   document.getElementById('controls').style.display = 'flex';
   document.getElementById('tips').style.display = 'block';
   requestAnimationFrame(loop);
+  if (!localStorage.getItem('qin.ftueDone')) ftueStart();
 });
 
 // PWA:注册 Service Worker(轻量壳预缓存;失败静默)。
