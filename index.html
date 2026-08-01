@@ -95,7 +95,8 @@
     <option value="f" selected>立面 · 悬指</option>
     <option value="h">琴桌 · 拟真</option>
   </select>
-  <select id="scoreSel">
+  <button id="mapBtn" title="曲库与修行进度:分卷琴谱、四星收集、每日一句">琴谱</button>
+  <select id="scoreSel" style="display:none">
     <option value="" selected>自由弹奏</option>
     <option value="daily">每日一句 · 试千曲</option>
     <option value="ftue">开指引导 · 新手</option>
@@ -126,6 +127,44 @@
 </div>
 <div id="tips"></div>
 <style>
+  #map { display:none; position:fixed; inset:0; z-index:8; background:rgba(5,7,10,.97); overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .mp-wrap { max-width:430px; margin:0 auto; padding:26px 22px 60px; }
+  .mp-head { display:flex; justify-content:space-between; align-items:baseline; color:#d8c9a3; font-size:22px; letter-spacing:6px; margin-bottom:6px; }
+  .mp-head span { font-size:20px; letter-spacing:0; color:#9a8f74; cursor:pointer; padding:4px 10px; }
+  .mp-sub { color:#7d8a6a; font-size:11px; letter-spacing:2px; margin-bottom:18px; }
+  .mp-daily { border:1px solid #6b5a3a; border-radius:6px; padding:12px 16px; margin-bottom:22px;
+    display:flex; justify-content:space-between; align-items:center; cursor:pointer; color:#d8c9a3; font-size:15px; }
+  .mp-daily:hover { border-color:#c9b787; }
+  .mp-daily em { font-style:normal; color:#8fe0a8; font-size:12px; }
+  .mp-ch { margin-bottom:20px; }
+  .mp-chname { color:#c9b787; font-size:15px; letter-spacing:3px; margin-bottom:2px; }
+  .mp-chsub { color:#8a7a52; font-size:11px; letter-spacing:1px; margin-bottom:8px; }
+  .mp-list { border-left:1px solid #3a3428; margin-left:7px; padding-left:16px; }
+  .mp-song { display:flex; align-items:center; padding:9px 4px; cursor:pointer; border-radius:4px; }
+  .mp-song:hover { background:rgba(201,183,135,.08); }
+  .mp-dot { width:10px; height:10px; border-radius:50%; margin-right:12px; margin-left:-22.5px;
+    background:#0b0e12; border:1.5px solid #5a5344; flex:none; }
+  .mp-song.done .mp-dot { background:#c9b787; border-color:#c9b787; }
+  .mp-song.next .mp-dot { border-color:#e8c04c; animation:mpPulse 1.6s ease-out infinite; }
+  .mp-name { color:#d8c9a3; font-size:15px; flex:1; }
+  .mp-song.playing .mp-name { color:#8fe0a8; }
+  .mp-tag { font-size:11px; color:#e8c04c; margin-right:10px; }
+  .mp-stars { font-size:13px; letter-spacing:2px; color:#e8c04c; }
+  .mp-stars i { font-style:normal; color:rgba(200,200,200,.22); }
+  .mp-foot { margin-top:26px; text-align:center; color:#9a8f74; font-size:12px; }
+  .mp-foot span { cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+  @keyframes mpPulse { 0% { box-shadow:0 0 0 0 rgba(232,192,76,.55); } 100% { box-shadow:0 0 0 9px rgba(232,192,76,0); } }
+</style>
+<div id="map">
+  <div class="mp-wrap">
+    <div class="mp-head">琴 谱<span id="mapCloseX">✕</span></div>
+    <div class="mp-sub">分卷修行 · 每曲四星:曲终 八成准 一音不失 盲谱</div>
+    <div class="mp-daily" id="mpDaily"></div>
+    <div id="mpBody"></div>
+    <div class="mp-foot"><span id="mpFtue">重修「开指引导」</span>&emsp;·&emsp;<span id="mpFree">收谱 · 自由弹奏</span></div>
+  </div>
+</div>
+<style>
   #result button { font-family: inherit; font-size: 14px; padding: 6px 16px; margin: 0 6px;
     background: rgba(11,14,18,.6); color: #d8c9a3; border: 1px solid #6b5a3a; border-radius: 4px; cursor: pointer; }
   #result button:hover { border-color: #c9b787; }
@@ -153,7 +192,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.16.0';
+const APP_VER = 'v0.17.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1088,6 +1127,58 @@ function heartPose() {
   return c;
 }
 
+// ---------- 章节地图(琴谱卷轴):目录即旅程,星标即成就,锁卷即橱窗 ----------
+// 四卷分章;不设人为关卡锁(乐器自由是底线),地图只做三件事:
+// 显进度(星/完成点)、荐下一曲(呼吸圆点)、亮橱窗(知音卷可试奏一句)
+const CHAPTERS = [
+  { name: '卷一 · 开指', sub: '空手入门,四技俱全', keys: ['practice', 'xingxing', 'laohu', 'xianweng'] },
+  { name: '卷二 · 移植', sub: '耳熟的旋律,琴上的乡音', keys: ['molihua', 'canghai', 'songbie'] },
+  { name: '卷三 · 古调', sub: '泛音与酒狂,古意渐深', keys: ['liushui', 'jiukuang', 'yangguan'] },
+  { name: '终卷 · 大曲', sub: '七十二音,一气呵成', keys: ['shenren'] },
+];
+const mapEl = document.getElementById('map');
+function mapBuild() {
+  const prog = progLoad();
+  const day = Math.floor(Date.now() / 86400000);
+  const dailyDone = +localStorage.getItem('qin.dailyDay') === day;
+  const streak = +localStorage.getItem('qin.streak') || 0;
+  document.getElementById('mpDaily').innerHTML =
+    `<span>每日一句 · 试千曲</span><em>${dailyDone ? `今日已成 · 连续 ${streak} 日` : streak ? `连续 ${streak} 日 · 今日未练` : '开个头,攒一串日子'}</em>`;
+  // 荐曲:第一首未曲终的;全通则荐第一首缺星的(含知音卷=转化位)
+  const allKeys = CHAPTERS.flatMap(c => c.keys);
+  const nextKey = allKeys.find(k => !((prog[k] || {}).s & 1)) ||
+                  allKeys.find(k => STAR_BITS.some(b => !((prog[k] || {}).s & b)));
+  document.getElementById('mpBody').innerHTML = CHAPTERS.map(ch => {
+    const locked = ch.keys.every(k => !SCORES[k].free) && !ENT.zhiyin;
+    return `<div class="mp-ch"><div class="mp-chname">${ch.name}</div>
+      <div class="mp-chsub">${locked ? '藏于「知音」 · 皆可试奏一句' : ch.sub}</div>
+      <div class="mp-list">` + ch.keys.map(k => {
+        const pv = prog[k] || { s: 0 };
+        const stN = STAR_BITS.filter(b => pv.s & b).length;
+        const cls = ['mp-song', pv.s & 1 ? 'done' : '', k === nextKey ? 'next' : '', game && game.key === k ? 'playing' : ''].join(' ');
+        const kLocked = !SCORES[k].free && !ENT.zhiyin;
+        const tag = game && game.key === k ? '<span class="mp-tag" style="color:#8fe0a8">弹奏中</span>'
+          : k === nextKey ? '<span class="mp-tag">下一曲</span>' : '';
+        const right = kLocked ? '<span class="mp-tag">🔒 试奏</span>'
+          : `<span class="mp-stars">${'★'.repeat(stN)}<i>${'☆'.repeat(4 - stN)}</i></span>`;
+        return `<div class="${cls}" data-k="${k}"><span class="mp-dot"></span><span class="mp-name">${SCORES[k].name}</span>${tag}${right}</div>`;
+      }).join('') + '</div></div>';
+  }).join('');
+}
+function mapOpen() { mapBuild(); mapEl.style.display = 'block'; }
+function mapClose() { mapEl.style.display = 'none'; }
+document.getElementById('mapBtn').addEventListener('click', mapOpen);
+document.getElementById('mapCloseX').addEventListener('click', mapClose);
+mapEl.addEventListener('click', (e) => { if (e.target === mapEl) mapClose(); });
+document.getElementById('mpDaily').addEventListener('click', () => { scoreSel.value = 'daily'; gameSet('daily'); mapClose(); });
+document.getElementById('mpBody').addEventListener('click', (e) => {
+  const row = e.target.closest('.mp-song');
+  if (!row) return;
+  scoreSel.value = row.dataset.k; gameSet(row.dataset.k); mapClose();
+});
+document.getElementById('mpFtue').addEventListener('click', () => { mapClose(); ftueStart(); });
+document.getElementById('mpFree').addEventListener('click', () => { scoreSel.value = ''; gameSet(''); mapClose(); });
+
 // ---------- 四星与结算(弹完不蒸发:星入档、档上榜) ----------
 // 四星判据:★1 曲终 ★2 准确≥80% ★3 一音不失 ★4 盲谱全对(全程关投影)
 // 存档 qin.prog = { 曲key: { s:星位掩码, acc:最佳准确率, n:弹奏次数 } },按位并集累积
@@ -1184,6 +1275,7 @@ function ftueFinish() {
   ftueSkipBtn.style.display = 'none';
   document.getElementById('tips').style.display = 'block';
   beep(660, 0.25, 0.05); setTimeout(() => beep(880, 0.25, 0.05), 180); setTimeout(() => beep(1320, 0.4, 0.06), 360);
+  setTimeout(mapOpen, 5800);   // 终礼看罢,展卷相迎:曲库即旅程的第一眼
 }
 function ftueOnPluck(i, opts) {
   if (!ftue.active) return;
