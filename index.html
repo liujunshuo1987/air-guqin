@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.22.1';
+const APP_VER = 'v0.22.2';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -504,7 +504,7 @@ const WORKLET_SRC = [
 '    }',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
 '    if (this.exciteLeft === -1) {',
-'      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
+'      this.exciteLeft = Math.max(64, Math.min(Math.floor(this.delay), Math.floor(sampleRate * 0.010)));',
 '      this.combOff = Math.max(1, Math.min(4000, Math.floor(this.pos * this.delay)));',
 '    }',
 '    for (let i = 0; i < out.length; i++) {',
@@ -657,7 +657,11 @@ function pluck(i, amp, freq, opts = {}) {
     }
     node.parameters.get('t60').value =
       (7.5 - i * 0.45) * Math.sqrt(s.openFreq / freq) * (opts.t60mul ?? 1);
-    const bright = opts.brightOverride ?? (0.32 + amp * 0.4 + (opts.plyBonus || 0));
+    // 从泛音反推的弦音明度(用户定调:泛音已是名琴之声,弦音应为其全谐波
+    // 丰满态):基线 0.32→0.40,低音区(<200Hz)按频率再补至 +0.10——
+    // 低弦谐波密于低频,同亮度下高次先闷死,曾致"哑、共鸣度不够"
+    const bright = opts.brightOverride ??
+      (0.40 + amp * 0.40 + Math.max(0, (200 - freq) / 200 * 0.10) + (opts.plyBonus || 0));
     node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
     // 拨点比例:拨点距岳山 / 振动段全长(岳山→按点或龙龈),决定激励的梳状谱形
     const stopX = opts.pressX ?? (qin.xL * W);
