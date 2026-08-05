@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.23.1';
+const APP_VER = 'v0.24.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -950,7 +950,9 @@ function readHands(ts) {
       const [px, py] = mapPoint(lms[p]);
       const [tx, ty] = mapPoint(lms[t]);
       const radial = Math.hypot(tx - wx, ty - wy) > Math.hypot(px - wx, py - wy);
-      const zFwd = (lms[t].z - lms[p].z) < -0.3 * normHand;
+      // z 前探触弦态只在拨弦区(二徽以右)成立:勾/抹爪形拨弦居右属琴理;
+      // 徽位区朝镜头的拳/掌是移位手,实录显示其穿行曾连响数弦(误触主源)
+      const zFwd = (lms[t].z - lms[p].z) < -0.3 * normHand && tx > hXOf(HUI[1]);
       fexR.push(radial);
       fex.push(radial || zFwd);
       if (radial || zFwd) ext++;
@@ -1663,7 +1665,9 @@ function playFacade() {
   if (curHands.length >= 2) {
     // 静态捏合=泛音宣告;高速移动的捏合=捻拨击弦(用户手型),不夺按弦角色
     const pinched = curHands.filter(hd => hd.pinch && hd.tipVn < 0.07);
-    const pointed = curHands.filter(hd => hd.point);
+    // 点指=按弦宣告,只在徽位区(三徽以左)成立——实录显示右手在拨弦区举食指
+    // 待命被判点指抢走按弦位,左手随之沦为拨弦手,拳/掌穿弦连响(误触链根源)
+    const pointed = curHands.filter(hd => hd.point && hd.idxTipX < hXOf(HUI[2]));
     if (pinched.length === 1) {
       pressH = pinched[0];
       const other = curHands.find(hd => hd.key !== pressH.key);
@@ -1689,7 +1693,8 @@ function playFacade() {
     // 捏合在三徽以左(泛音徽位工作区)=按弦手,无视速度——右手出画瞬间,
     // 左手捏合走位曾被"运动=捻拨"劫为拨弦手而发声(用户报告);
     // 捻拨只属于三徽以右的拨弦区
-    if ((h.pinch && (h.tipVn < 0.07 || h.idxTipX < hXOf(HUI[2]))) || h.point) pressH = h;
+    if ((h.pinch && (h.tipVn < 0.07 || h.idxTipX < hXOf(HUI[2])))
+        || (h.point && h.idxTipX < hXOf(HUI[2]))) pressH = h;
     else { pluckHandKey = h.key; roleSwapT = 0; }
   }
   pressHandKey = pressH ? pressH.key : null;
@@ -1782,11 +1787,19 @@ function playFacade() {
   //    外推触弦时刻,扣除管线延迟(所见本是旧影)后用音频时钟提前定时发声,
   //    把"看见才响"的半帧+管线滞后压到接近音频输出下限
   const pipeMs = (perfM.camLag || perfM.frameDt * 1.5) + perfM.infer;
+  // 信号缓冲:双手在中区相聚(比心成形途中/保持中)= 演奏静默——实录显示
+  // 停录比心穿弦曾扫响全弦,每条视频结尾都拖一串杂音
+  let sigMute = heartHoldP > 0;
+  if (!sigMute && curHands.length === 2) {
+    const scx = (curHands[0].wx + curHands[1].wx) / 2;
+    sigMute = Math.hypot(curHands[0].wx - curHands[1].wx, curHands[0].wy - curHands[1].wy)
+      < (curHands[0].size + curHands[1].size) * 0.75 && scx > W * 0.32 && scx < W * 0.68;
+  }
   for (const hd of curHands) {
     const isPress = pressH && hd.key === pressH.key;
     for (const tip of hd.tips) {
       const prev = prevTips.get(tip.key);
-      if (prev && !isPress && tip.fs >= 0.5 &&
+      if (prev && !isPress && !sigMute && tip.fs >= 0.5 &&
           tip.x > (qin.xL - 0.02) * W && tip.x < (qin.xY + 0.03) * W) {
         const vyPix = tip.y - prev.y;
         const vn = Math.abs(vyPix) / hd.size * dtScale;
