@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.22.0';
+const APP_VER = 'v0.22.1';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -417,6 +417,9 @@ let heartHoldStart = 0, heartHoldP = 0, heartPos = null;   // 双手比心(停�
 let recCountEnd = 0, recGestureCoolT = -1e9;          // 3-2-1 倒计时终点 / 手势冷却
 const predBy = new Array(7).fill(null);   // 各弦预判来源 {key, vy}(下一帧校验轨迹,失效即撤)
 let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
+let pressSmX = null;               // 按位平滑:速度自适应(定点稳、走手跟)
+let lastSnapK = -1;                // 徽位吸附滞回:吸进(0.014)易、吸出(0.022)难
+let lastFanK = -1;                 // 泛音徽位滞回:两徽正中不逐帧翻转
 let lastPluckedIdx = -1, pressHandKey = null;
 let pluckHandKey = null, roleSwapT = 0;   // 拨弦手(靠岳山侧,带滞回)
 let pressLine = null;              // 立面模式悬指按弦线 {x, label, pinch}
@@ -682,8 +685,14 @@ function pressFromFraction(fRaw) {
   let f = Math.min(1, Math.max(0.25, fRaw));
   let label = '';
   const k = nearestHuiIdx(f), d = Math.abs(f - HUI[k]);
-  if (snapChk.checked && d < 0.014 && HUI[k] >= 0.25) { f = HUI[k]; label = HUI_NAMES[k] + '徽'; }
-  else if (d < 0.03) label = '≈' + HUI_NAMES[k] + '徽';
+  // 吸附滞回:吸进 0.014、吸出 0.022——阈值边缘的关键点抖动不再让音高
+  // 在"正徽"与"原始位"之间扑动(用户报告定点不稳的另一半根源)
+  const snapTol = (lastSnapK === k) ? 0.022 : 0.014;
+  if (snapChk.checked && d < snapTol && HUI[k] >= 0.25) { f = HUI[k]; label = HUI_NAMES[k] + '徽'; lastSnapK = k; }
+  else {
+    if (lastSnapK === k) lastSnapK = -1;
+    if (d < 0.03) label = '≈' + HUI_NAMES[k] + '徽';
+  }
   return { f, label };
 }
 
@@ -1662,9 +1671,21 @@ function playFacade() {
     if (lastPressSi >= 0 && lastPressSi !== si
         && Math.abs(pressH.idxTipY - strings[lastPressSi].y) < qin.dy * H * 0.65) si = lastPressSi;
     lastPressSi = si;
-    const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressH.idxTipX)));
+    // 定点稳、走手跟:关键点抖动直通曾致悬停定徽扑动(用户报告"稳定度不太好")。
+    // 慢速(抖动量级)重滤 α=0.12,快速滑动 α→1 直通,大跳(换把)瞬移不拖尾
+    const rawPX = pressH.idxTipX;
+    if (pressSmX == null || Math.abs(rawPX - pressSmX) > W * 0.08) pressSmX = rawPX;
+    else {
+      const vRel = Math.abs(rawPX - pressSmX) / (W * 0.012);
+      pressSmX += (rawPX - pressSmX) * Math.min(1, 0.12 + 0.88 * vRel * vRel);
+    }
+    const fRaw = Math.min(1, Math.max(0.125, hFracAt(pressSmX)));
     if (pressH.pinch) {
-      const k = nearestHuiIdx(fRaw);
+      let k = nearestHuiIdx(fRaw);
+      // 两徽正中不逐帧翻转:原徽位保有 0.012 弦长比的让位余量
+      if (lastFanK >= 0 && k !== lastFanK
+          && Math.abs(fRaw - HUI[lastFanK]) < Math.abs(fRaw - HUI[k]) + 0.012) k = lastFanK;
+      lastFanK = k;
       pressInfo = { pinch: true, k, si, label: '泛·' + HUI_NAMES[k] + '徽', x: hXOf(HUI[k]) };
     } else {
       const pr = pressFromFraction(fRaw);
@@ -1682,7 +1703,7 @@ function playFacade() {
     }
     pressLine = { x: pressInfo.x, label: pressInfo.label, pinch: pressInfo.pinch, y: strings[pressInfo.si].y };
   } else {
-    lastHuiK = -1; lastPressSi = -1;
+    lastHuiK = -1; lastPressSi = -1; pressSmX = null; lastSnapK = -1; lastFanK = -1;
     if (now > mousePressUntil) pressLine = null;
   }
 
@@ -2523,6 +2544,7 @@ function applyMode(m) {
   prevTips.clear(); handSpeed.clear(); handOpen.clear(); pinchState.clear(); handPoint.clear(); handFinger.clear();
   pressLine = null; lastPluckedIdx = -1; pressHandKey = null;
   pluckHandKey = null; roleSwapT = 0; pressFistN = 0; pressLatch = false; lastPressSi = -1;
+  pressSmX = null; lastSnapK = -1; lastFanK = -1;
   predAt.fill(-1e9); predBy.fill(null);
   qin = { ...QIN_DEFAULT };          // 切换模式恢复默认琴位,平举定琴可随时重设
   refreshGeom();
