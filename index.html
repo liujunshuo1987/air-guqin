@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.21.3';
+const APP_VER = 'v0.22.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1628,7 +1628,10 @@ function playFacade() {
   } else if (curHands.length === 1) {
     // 单手:点指/捏合的指型宣告=按弦手(可单手按徽/泛);否则为拨弦手
     const h = curHands[0];
-    if ((h.pinch && h.tipVn < 0.07) || h.point) pressH = h;
+    // 捏合在三徽以左(泛音徽位工作区)=按弦手,无视速度——右手出画瞬间,
+    // 左手捏合走位曾被"运动=捻拨"劫为拨弦手而发声(用户报告);
+    // 捻拨只属于三徽以右的拨弦区
+    if ((h.pinch && (h.tipVn < 0.07 || h.idxTipX < hXOf(HUI[2]))) || h.point) pressH = h;
     else { pluckHandKey = h.key; roleSwapT = 0; }
   }
   pressHandKey = pressH ? pressH.key : null;
@@ -1761,12 +1764,15 @@ function fPluck(i, amp, pressInfo, plX, handKey, when) {
   // 按/泛只作用于指下那根弦(si);拨其余弦为散音
   const applies = pressInfo && (pressInfo.si === undefined || pressInfo.si === i);
   if (applies && pressInfo.pinch) {
-    // 泛音走"空气琴美学":清脆如钟磬、易发而饱满——亮度高开(高次谐波不闷死,
-    // 一徽 8 倍频也透)、余音清长、按谐波次数补偿音量(越高次激励能量越少)
+    // 泛音=本弦之声的纯净化(用户定调:同一乐器,不另起炉灶)——亮度取普通
+    // 音公式的八成(更纯更暗,激励噪声窄带化,根治"一到泛音就有背噪"),
+    // 余音略短于按音;音量以七徽为基准略轻于弦音,高徽次只做温和补偿
+    // (旧版 0.75 高亮 + 1.1~1.4 全线增益 = 比弦音又亮又响,用户判"不像同一件乐器")
     const n = HARM[pressInfo.k];
     freq = strings[i].openFreq * n;
-    opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.9, brightOverride: 0.75 };
-    amp = Math.min(1, amp * Math.min(1.4, 1.1 + 0.05 * n));
+    opts = { label: pressInfo.label, harmonic: true, huiK: pressInfo.k, t60mul: 0.85,
+             brightOverride: 0.26 + amp * 0.32 };
+    amp = Math.min(1, amp * Math.min(1.15, 0.85 + 0.05 * n));
   } else if (applies) {
     freq = strings[i].openFreq / pressInfo.f;
     opts.label = pressInfo.label;
