@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.21.2';
+const APP_VER = 'v0.21.3';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -909,8 +909,12 @@ function readHands(ts) {
     // 逐指触弦态记分(0.85/帧衰减≈4帧记忆,拨弦动作中瞬间弯曲不误伤):
     // 收拢的指=抬离弦面,划过弦线不发声——"合上的手指不碰弦"(用户报告)
     const factive = [thumbOut, fex[0], fex[1], fex[2], fex[3]];
-    // 拇食相合的捻拨(如持拨片):合尖即触弦态,拇指食指计为可拨;捏合手不算拳
-    if (pinch) { factive[0] = true; factive[1] = true; if (ext === 0) ext = 1; }
+    // 拇食相合的捻拨(如持拨片):合尖即触弦态,拇指食指计为可拨;捏合手不算拳。
+    // 但真拳里拇指常贴食指而误判捏合——曾使拳头穿弦发声,且换弦握拳移动时
+    // 低幅幻拨铺成"背噪"(用户报告)。捻拨手型余指张开(extR≥1),拳四指全收:
+    // 以纯径向伸指数分流,拳的静默穿弦优先于捻拨
+    const extRN = (fexR[0] ? 1 : 0) + (fexR[1] ? 1 : 0) + (fexR[2] ? 1 : 0) + (fexR[3] ? 1 : 0);
+    if (pinch && extRN > 0) { factive[0] = true; factive[1] = true; if (ext === 0) ext = 1; }
     const prevFs = handFinger.get(key) || [0, 0, 0, 0, 0];
     const fscore = factive.map((a, j) => Math.max(a ? 1 : 0, prevFs[j] * 0.85));
     handFinger.set(key, fscore);
@@ -936,7 +940,7 @@ function readHands(ts) {
     const nowMs = performance.now();
     if (tipVn > vnPeak.v || nowMs - vnPeak.t > 10000) vnPeak = { v: tipVn, t: nowMs };
     curHands.push({ key, wx, wy, tips, pinch, point, open, ok, extRaw: ext,
-      extR: (fexR[0] ? 1 : 0) + (fexR[1] ? 1 : 0) + (fexR[2] ? 1 : 0) + (fexR[3] ? 1 : 0),   // 纯径向伸指数:拳=0(zFwd/捏合不干扰)
+      extR: extRN,   // 纯径向伸指数:拳=0(zFwd/捏合不干扰)
       speed: ema, idxTipY: ty8, idxTipX: tx8, size: handSize, tipVn, pinchRatio });
   }
 
