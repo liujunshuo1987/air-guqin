@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.23.0';
+const APP_VER = 'v0.23.1';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -391,6 +391,7 @@ const video = document.getElementById('cam');
 let W = 0, H = 0;
 let mode = 'f';                    // 'f' 立面悬指 | 'h' 琴桌拟真
 let audioCtx = null, stringNodes = [], masterReady = false, recDest = null;
+let bloomSends = [];               // 琴体余响湿度(每弦,拨时按散/泛定量)
 let dryOut = null;                 // 采样直通出口(采样自带琴体声,不再过共鸣链免二次染色)
 let fanSamples = new Array(7).fill(null);   // 每弦七徽泛音采样 {buf, baseFreq, offset, norm}
 const activeFan = new Set();       // 发声中的泛音采样(煞音一并止息)
@@ -475,10 +476,13 @@ const WORKLET_SRC = [
 '  constructor() { super();',
 '    this.N = Math.ceil(sampleRate / 28) + 8;',
 '    this.buf = new Float32Array(this.N);',
+'    this.buf2 = new Float32Array(this.N);',   // 双线微失谐:真弦两偏振模态的合鸣(宽度)
+'    this.det = 0.0013; this.lp2 = 0;',
 '    this.w = 0; this.delay = sampleRate / 110; this.lp = 0;',
 '    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
 '    this.pos = 0.12; this.combOff = 8;',
-'    this.bEnv = 0; this.bDk = 1;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
+'    this.bEnv = 0; this.bDk = 1;',
+'    this.exEnv = 1; this.exDk = 1;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
 '    this.nh = new Float32Array(4096); this.nhi = 0;',
 '    this.pend = null;',            // 预判定时拨弦(音频时钟精确调度)
 '    this.port.onmessage = (e) => {',
@@ -509,7 +513,8 @@ const WORKLET_SRC = [
 '    }',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
 '    if (this.exciteLeft === -1) {',
-'      this.exciteLeft = Math.max(64, Math.min(Math.floor(this.delay), Math.floor(sampleRate * 0.010)));',
+'      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
+'      this.exEnv = 1; this.exDk = Math.exp(-1 / (sampleRate * 0.004));',   // 包络式激励:全周期能量(低弦分贝)+ 4ms 速衰(净攻击)
 '      this.combOff = Math.max(1, Math.min(4000, Math.floor(this.pos * this.delay)));',
 '    }',
 '    for (let i = 0; i < out.length; i++) {',
@@ -518,19 +523,28 @@ const WORKLET_SRC = [
 '      while (rp < 0) rp += this.N;',
 '      const i0 = rp | 0, i1 = (i0 + 1) % this.N, fr = rp - i0;',
 '      const s = this.buf[i0] * (1 - fr) + this.buf[i1] * fr;',
-'      const bf = Math.min(bright, 0.30);',   // 亮度包络:起音全亮,按 btau 落回醇底
-'      this.lp += (bf + (bright - bf) * this.bEnv) * (s - this.lp);',
+'      let rp2 = this.w - this.delay * (1 + this.det);',
+'      while (rp2 < 0) rp2 += this.N;',
+'      const j0 = rp2 | 0, j1 = (j0 + 1) % this.N, fr2 = rp2 - j0;',
+'      const s2 = this.buf2[j0] * (1 - fr2) + this.buf2[j1] * fr2;',
+'      const bf = Math.min(bright, 0.26);',   // 亮度包络:起音全亮,按 btau 落回醇底
+'      const bEff = bf + (bright - bf) * this.bEnv;',
+'      this.lp += bEff * (s - this.lp);',
+'      this.lp2 += bEff * (s2 - this.lp2);',
 '      if (this.bDk < 1) this.bEnv *= this.bDk;',
-'      let v = this.lp * fb;',
+'      let v = this.lp * fb, v2 = this.lp2 * fb;',
 '      if (this.exciteLeft > 0) {',   // 激励经拨点梳状滤波:拨点处谐波节点被抑制
-'        const wn = Math.random() * 2 - 1;',
+'        const wn = (Math.random() * 2 - 1) * this.exEnv;',
+'        this.exEnv *= this.exDk;',
 '        this.nh[this.nhi & 4095] = wn;',
-'        v += (wn - this.nh[(this.nhi - this.combOff) & 4095]) * this.amp * 0.8;',
+'        const ex = (wn - this.nh[(this.nhi - this.combOff) & 4095]) * this.amp * 0.8;',
+'        v += ex; v2 += ex;',
 '        this.nhi++; this.exciteLeft--;',
 '      }',
 '      this.buf[this.w] = v;',
+'      this.buf2[this.w] = v2;',
 '      this.w = (this.w + 1) % this.N;',
-'      out[i] = v;',
+'      out[i] = (v + v2) * 0.5;',
 '    }',
 '    return true;',
 '  }',
@@ -550,6 +564,21 @@ async function initAudio() {
   const comp  = new DynamicsCompressorNode(audioCtx, { threshold: -20, ratio: 3, attack: 0.004, release: 0.2 });
   const master = new GainNode(audioCtx, { gain: 0.85 });
   shelf.connect(body1).connect(body2).connect(roll).connect(comp).connect(master).connect(audioCtx.destination);
+  // 琴体余响:0.3s 指数衰减的去相关立体噪声 IR(体腔的"湿",非厅堂混响);
+  // 发送量在拨弦时按散/泛分定——泛音保持近干(已获好评勿动)
+  const irLen = Math.floor(audioCtx.sampleRate * 0.30);
+  const ir = audioCtx.createBuffer(2, irLen, audioCtx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < irLen; i++) {
+      const n = (Math.random() * 2 - 1) * Math.exp(-i / (audioCtx.sampleRate * 0.10));
+      lp += 0.22 * (n - lp);   // 暖化:高频先散
+      d[i] = lp;
+    }
+  }
+  const bloom = new ConvolverNode(audioCtx, { buffer: ir });
+  bloom.connect(comp);
   dryOut = master;
   loadFanSamples();   // 泛音采样后台加载,缺文件自动回退合成
   recDest = audioCtx.createMediaStreamDestination();
@@ -561,6 +590,9 @@ async function initAudio() {
     node.parameters.get('t60').value = 7.5 - i * 0.45;
     const g = new GainNode(audioCtx, { gain: 0.9 });
     node.connect(g).connect(shelf);
+    const send = new GainNode(audioCtx, { gain: 0.2 });
+    node.connect(send).connect(bloom);
+    bloomSends[i] = send;
     return node;
   });
 
@@ -668,7 +700,7 @@ function pluck(i, amp, freq, opts = {}) {
     // 丰满态):基线 0.32→0.40,低音区(<200Hz)按频率再补至 +0.10——
     // 低弦谐波密于低频,同亮度下高次先闷死,曾致"哑、共鸣度不够"
     const bright = opts.brightOverride ??
-      (0.40 + amp * 0.40 + Math.max(0, (200 - freq) / 200 * 0.10) + (opts.plyBonus || 0));
+      (0.33 + amp * 0.30 + Math.max(0, (200 - freq) / 200 * 0.06) + (opts.plyBonus || 0));
     node.parameters.get('brightness').value = Math.min(0.9, Math.max(0.08, bright));
     // 拨点比例:拨点距岳山 / 振动段全长(岳山→按点或龙龈),决定激励的梳状谱形
     const stopX = opts.pressX ?? (qin.xL * W);
@@ -677,8 +709,11 @@ function pluck(i, amp, freq, opts = {}) {
       : 0.12;
     // 丝弦时变亮度:弦音亮起暗落(τ=0.45s,实测真琴高频 t60≈基音 0.3~0.5 倍,
     // 静态亮度的高次谐波从头亮到尾即"钢线感");泛音 btau=0 保持静态醇厚
-    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos,
-      when: opts.when || 0, btau: opts.harmonic ? 0 : 0.45 });
+    // 低弦能量补偿:激励包络化后按频率补足注入(一弦 ×1.5),根治"低音分贝不够"
+    const lowB = 1 + Math.max(0, (180 - freq) / 180) * 0.5;
+    bloomSends[i].gain.setTargetAtTime(opts.harmonic ? 0.07 : 0.24, audioCtx.currentTime, 0.02);
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp * lowB) * 0.55, pos,
+      when: opts.when || 0, btau: opts.harmonic ? 0 : 0.32 });
   }
   if (!opts.noJudge) { judgeNote(i, opts); ftueOnPluck(i, opts); }
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
