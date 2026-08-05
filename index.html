@@ -245,7 +245,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.22.2';
+const APP_VER = 'v0.23.0';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -477,7 +477,8 @@ const WORKLET_SRC = [
 '    this.buf = new Float32Array(this.N);',
 '    this.w = 0; this.delay = sampleRate / 110; this.lp = 0;',
 '    this.exciteLeft = 0; this.amp = 0; this.snapNext = false;',
-'    this.pos = 0.12; this.combOff = 8;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
+'    this.pos = 0.12; this.combOff = 8;',
+'    this.bEnv = 0; this.bDk = 1;',       // 拨弦位置(距岳山弦长比)与对应梳状延迟
 '    this.nh = new Float32Array(4096); this.nhi = 0;',
 '    this.pend = null;',            // 预判定时拨弦(音频时钟精确调度)
 '    this.port.onmessage = (e) => {',
@@ -486,6 +487,8 @@ const WORKLET_SRC = [
 '        if (d.when && d.when > currentTime) { this.pend = d; return; }',
 '        this.amp = d.amp; this.snapNext = true;',
 '        this.pos = d.pos || 0.12;',
+'        this.bDk = d.btau ? Math.exp(-1 / (sampleRate * d.btau)) : 1;',
+'        this.bEnv = 1;',
 '        this.exciteLeft = -1;',
 '      } else if (d.type === "unpluck") {',   // 轨迹失效,撤销未发的预判音
 '        this.pend = null;',
@@ -500,6 +503,8 @@ const WORKLET_SRC = [
 '    const bright = p.brightness[0];',
 '    if (this.pend && currentTime >= this.pend.when - 128 / sampleRate) {',
 '      this.amp = this.pend.amp; this.pos = this.pend.pos || 0.12;',
+'      this.bDk = this.pend.btau ? Math.exp(-1 / (sampleRate * this.pend.btau)) : 1;',
+'      this.bEnv = 1;',
 '      this.snapNext = true; this.exciteLeft = -1; this.pend = null;',
 '    }',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
@@ -513,7 +518,9 @@ const WORKLET_SRC = [
 '      while (rp < 0) rp += this.N;',
 '      const i0 = rp | 0, i1 = (i0 + 1) % this.N, fr = rp - i0;',
 '      const s = this.buf[i0] * (1 - fr) + this.buf[i1] * fr;',
-'      this.lp += bright * (s - this.lp);',
+'      const bf = Math.min(bright, 0.30);',   // 亮度包络:起音全亮,按 btau 落回醇底
+'      this.lp += (bf + (bright - bf) * this.bEnv) * (s - this.lp);',
+'      if (this.bDk < 1) this.bEnv *= this.bDk;',
 '      let v = this.lp * fb;',
 '      if (this.exciteLeft > 0) {',   // 激励经拨点梳状滤波:拨点处谐波节点被抑制
 '        const wn = Math.random() * 2 - 1;',
@@ -668,7 +675,10 @@ function pluck(i, amp, freq, opts = {}) {
     const pos = opts.plX != null
       ? Math.min(0.5, Math.max(0.05, (qin.xY * W - opts.plX) / Math.max(1, qin.xY * W - stopX)))
       : 0.12;
-    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos, when: opts.when || 0 });
+    // 丝弦时变亮度:弦音亮起暗落(τ=0.45s,实测真琴高频 t60≈基音 0.3~0.5 倍,
+    // 静态亮度的高次谐波从头亮到尾即"钢线感");泛音 btau=0 保持静态醇厚
+    node.port.postMessage({ type: 'pluck', amp: Math.min(1, amp) * 0.55, pos,
+      when: opts.when || 0, btau: opts.harmonic ? 0 : 0.45 });
   }
   if (!opts.noJudge) { judgeNote(i, opts); ftueOnPluck(i, opts); }
   console.log(`[pluck] 弦${STRING_NAMES[i]} ${freq.toFixed(1)}Hz ${opts.label || '散音'}`);
