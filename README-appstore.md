@@ -26,6 +26,57 @@
 5. 协议、税务和银行:签 Paid Apps 协议、填收款账户(IAP 上架硬前提)
 6. 沙盒测试员:用户与访问 → 沙盒 → 新建测试 Apple ID(真机测购买用)
 
+## ASC 填表抄写卡(逐屏粘贴)
+
+### 第 0 屏 · developer.apple.com → Identifiers(先注册 Bundle ID)
+Certificates, Identifiers & Profiles → Identifiers → ➕ → App IDs → App
+- Description: `Wuxianqin`
+- Bundle ID: **Explicit** → `com.jeonshoeck.wuxianqin`
+- Capabilities: 勾 **In-App Purchase**(其余不动)→ Register
+
+### 第 1 屏 · App Store Connect → 我的 App → ➕ 新建 App
+- 平台: iOS
+- 名称: `無絃琴`(若被占用,备选 `無絃琴 · 凌空古琴`、`無絃琴 Air Qin`)
+- 主要语言: 简体中文
+- 套装 ID: 选 `com.jeonshoeck.wuxianqin`
+- SKU: `wuxianqin`
+- 用户访问权限: 完全访问
+
+### 第 2 屏 · App 信息
+- 副标题: `凌空抚琴,以身为琴`
+- 类别: 主要 **音乐**;次要 教育
+- 年龄分级问卷: 全部"无" → **4+**
+
+### 第 3 屏 · 定价与销售范围
+- 价格: **免费**(App 本体免费,收费在内购)
+- 销售范围: 全部地区,**先取消勾选中国大陆**(备案后再补开)
+
+### 第 4 屏 · App 隐私
+- 隐私政策 URL: `https://jeonshoeck.com/wuxianqin/privacy`
+- 数据收集: **不收集数据**(Data Not Collected,逐项如实选"否")
+
+### 第 5 屏 · 功能 → App 内购买项目 → ➕
+- 类型: **非消耗型**(Non-Consumable)
+- 参考名称: `知音`
+- 产品 ID: `com.jeonshoeck.wuxianqin.zhiyin` ← **逐字符核对,建后不可改**
+- 价格: 选 ¥45 对应档位
+- 本地化(简体中文):
+  - 显示名称: `知音`
+  - 描述: `三卷曲谱全启,雅号之印,金玉之声三境`
+- 审核截图: 提审前补(App 内知音页截图即可)
+- ⚠ 首个版本提审时,在版本页底部**勾选随版本提交此内购**
+
+### 第 6 屏 · 协议、税务和银行(付费前提)
+- Paid Applications 协议 → 同意
+- 银行: NeuronSpark Media-Tech Limited 的香港对公账户(SWIFT)
+- 税表: 美国 **W-8BEN-E**(香港实体,无美国活动选 No 即可)
+
+### 提审文案备用
+- 技术支持网址: `https://jeonshoeck.com/neuronspark`
+- 营销网址: `https://jeonshoeck.com/wuxianqin`
+- 关键词(≤100字符): `古琴,乐器,国风,雅乐,减字谱,泛音,传统文化,冥想,音乐,汉文化`
+- 描述与审核备注: 见下方"提审页要点"
+
 ## 每次构建与发布
 
 ```bash
