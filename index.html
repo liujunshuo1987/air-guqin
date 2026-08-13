@@ -173,9 +173,9 @@
     <div class="zy-item"><b>三卷全启</b><span>移植 · 古调 · 大曲,十一谱全篇尽弹,后续新谱入库同享</span></div>
     <div class="zy-item"><b>雅号之印</b><span>刻你的一至四字雅号,朱砂落款于每一段录制——你的琴,你的印</span></div>
     <div class="zy-item"><b>金玉之声</b><span>三境音色:幽谷 · 古刹 · 雪夜——空山、梵刹、炉边雪,一键换境</span></div>
-    <div style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · ¥45 · 永久</div>
+    <div style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · ¥48 · 永久</div>
     <div id="zyStatus" style="font-size:12px; color:#9a8f74; margin-bottom:24px; line-height:1.8"></div>
-    <button id="zyBuy" style="display:none">成为知音 · ¥45</button>
+    <button id="zyBuy" style="display:none">成为知音 · ¥48</button>
     <button id="zyRestore" style="display:none; font-size:12px">恢复购买</button>
     <button id="zySeal" style="display:none">刻我的雅号印</button>
     <button id="zyClose">回琴</button>
@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.2';
+const APP_VER = 'v0.25.3';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1410,6 +1410,11 @@ function iapInit() {
   const { store, ProductType, Platform } = window.CdvPurchase;
   store.register([{ id: IAP_PRODUCT, type: ProductType.NON_CONSUMABLE, platform: Platform.APPLE_APPSTORE }]);
   store.when().approved(tr => tr.finish());
+  // 商店拉到真实本地化价格后刷新按钮(各地区货币各显其价,标价永不失实)
+  store.when().productUpdated(p => {
+    if (p.id === IAP_PRODUCT && p.pricing && p.pricing.price)
+      document.getElementById('zyBuy').textContent = '成为知音 · ' + p.pricing.price;
+  });
   store.when().finished(tr => { if (tr.products.some(p => p.id === IAP_PRODUCT)) iapGrant(); });
   store.initialize([Platform.APPLE_APPSTORE]);
 }

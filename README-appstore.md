@@ -22,7 +22,7 @@
    Bundle ID 选上一步、SKU 随意(如 wuxianqin)
 4. App 内购买项目 → 新建**非消耗型**:
    - 产品 ID 必须逐字符等于 `com.jeonshoeck.wuxianqin.zhiyin`
-   - 价格档选 ¥45 对应档位;名称「知音」,描述照知音页三项权益写
+   - 价格档选 ¥48 档(2026-08 实选);名称「知音」,描述照知音页三项权益写
 5. 协议、税务和银行:签 Paid Apps 协议、填收款账户(IAP 上架硬前提)
 6. 沙盒测试员:用户与访问 → 沙盒 → 新建测试 Apple ID(真机测购买用)
 
@@ -59,7 +59,7 @@ Certificates, Identifiers & Profiles → Identifiers → ➕ → App IDs → App
 - 类型: **非消耗型**(Non-Consumable)
 - 参考名称: `知音`
 - 产品 ID: `com.jeonshoeck.wuxianqin.zhiyin` ← **逐字符核对,建后不可改**
-- 价格: 选 ¥45 对应档位
+- 价格: 已选 ¥48 档
 - 本地化(简体中文):
   - 显示名称: `知音`
   - 描述: `三卷曲谱全启,雅号之印,金玉之声三境`
