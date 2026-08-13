@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.1';
+const APP_VER = 'v0.25.2';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -578,7 +578,6 @@ const WORKLET_SRC = [
 '  }',
 '  process(inputs, outputs, p) {',
 '    const out = outputs[0][0];',
-'    const inp = inputs[0] && inputs[0][0];',   // 弦间共振总线(他弦微量能量,自馈已在接线层排除)
 '    const f = Math.max(30, p.frequency[0]);',
 '    const apA = Math.min(0.25, Math.max(0.06, 0.28 - f / 900));',   // 色散:低弦重高弦轻(真弦刚性撑宽谐波列)
 '    const target = Math.max(4, sampleRate / f - 0.5 - (1 - apA) / (1 + apA));',   // 扣除全通相位延迟保音准
@@ -591,6 +590,10 @@ const WORKLET_SRC = [
 '      this.snapNext = true; this.exciteLeft = -1; this.pend = null;',
 '    }',
 '    if (this.snapNext) { this.delay = target; this.snapNext = false; }',
+'    if (!isFinite(this.lp) || !isFinite(this.lp2)) {',   // NaN 自愈:清环重生
+'      this.buf.fill(0); this.buf2.fill(0);',
+'      this.lp = 0; this.lp2 = 0; this.ap1 = 0; this.ap1x = 0; this.ap2 = 0; this.ap2x = 0;',
+'    }',
 '    if (this.exciteLeft === -1) {',
 '      this.exciteLeft = Math.max(64, Math.floor(this.delay));',
 '      this.exEnv = 1; this.exDk = Math.exp(-1 / (sampleRate * 0.004));',   // 包络式激励:全周期能量(低弦分贝)+ 4ms 速衰(净攻击)
@@ -624,7 +627,6 @@ const WORKLET_SRC = [
 '        v += ex; v2 += ex;',
 '        this.nhi++; this.exciteLeft--;',
 '      }',
-'      if (inp) { const sy = inp[i]; v += sy; v2 += sy; }',
 '      this.buf[this.w] = v;',
 '      this.buf2[this.w] = v2;',
 '      this.w = (this.w + 1) % this.N;',
@@ -703,12 +705,17 @@ async function initAudio() {
     hallSends[i] = hs;
     return node;
   });
-  // 弦间共振:拨一弦,余六弦被微量带起(古琴录音里那圈"晕")。
-  // 每弦只接收其余六弦(自馈严格排除——自回馈会抬高环路增益致失稳)
+  // 弦间共振(读式和鸣):七枚高 Q 带通"和鸣器"并联主线,只听不馈。
+  // 直馈入环的前版在正调定弦下失稳:七弦共享大量谐波(一六弦同宫、
+  // 四五纯五度),互馈网络在共享泛音频点集体增益>1,能量缓积至浮点溢出
+  // →NaN→全弦永久哑(用户实测"弹着弹着没声音")。读式无反馈,绝对稳定
+  const haloIn = new GainNode(audioCtx, { gain: 1 });
+  for (let j = 0; j < 7; j++) postGains[j].connect(haloIn);
+  const haloSum = new GainNode(audioCtx, { gain: 0.07 });
+  haloSum.connect(comp);
   for (let i = 0; i < 7; i++) {
-    const sym = new GainNode(audioCtx, { gain: 0.004 });
-    for (let j = 0; j < 7; j++) if (j !== i) postGains[j].connect(sym);
-    sym.connect(stringNodes[i]);
+    const bp = new BiquadFilterNode(audioCtx, { type: 'bandpass', frequency: strings[i].openFreq, Q: 32 });
+    haloIn.connect(bp).connect(haloSum);
   }
 
   await audioCtx.resume();
