@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.3';
+const APP_VER = 'v0.25.4';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -1437,8 +1437,14 @@ document.getElementById('zyBuy').addEventListener('click', () => {
   stat('zy_buy_tap');
   const p = window.CdvPurchase && window.CdvPurchase.store.get(IAP_PRODUCT);
   const offer = p && p.getOffer();
-  if (offer) offer.order();
-  else statusNote = '⚠ 商店暂不可达,稍后再试';
+  if (offer) { offer.order(); return; }
+  // 拉不到商品:九成是 Paid Apps 协议未生效(银行/税表流程中)或新品未传播;
+  // 提示写进页内醒目处——曾只写 HUD,用户以为按钮"点不动"
+  statusNote = '⚠ 商店暂不可达';
+  document.getElementById('zyStatus').innerHTML =
+    '⚠ 暂时连不上 App Store 商品<br>' +
+    (window.CdvPurchase ? '常见原因:开发者协议(银行/税表)尚未全部生效,或新建商品还在传播中(最多数小时)——稍后再试'
+                        : '内购组件未加载,请整关 App 重开');
 });
 document.getElementById('zyRestore').addEventListener('click', () => {
   stat('zy_restore_tap');
