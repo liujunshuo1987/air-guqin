@@ -6,7 +6,7 @@
 ## 架构一览
 
 - 壳:Capacitor 7,`webDir=www`(由 `scripts/build-www.sh` 从仓库根收集),
-  `appId=com.jeonshoeck.wuxianqin`,iosScheme=https(保证 getUserMedia 安全上下文)
+  `appId=com.neuronspark.wuxianqin`,iosScheme=https(保证 getUserMedia 安全上下文)
 - IAP:cordova-plugin-purchase(StoreKit),产品 ID `com.jeonshoeck.wuxianqin.zhiyin`
   (非消耗型买断)。购买/恢复按钮仅在原生壳内出现(`isNativeApp()` 守卫),
   成交后本机落 `qin.tier=zhiyin`——无服务器、不接触支付信息
@@ -17,7 +17,7 @@
 ## 一次性准备(App Store Connect)
 
 1. Apple Developer Program 会员(个人 $99/年)
-2. Certificates, Identifiers & Profiles → 注册 Bundle ID `com.jeonshoeck.wuxianqin`
+2. Certificates, Identifiers & Profiles → 注册 Bundle ID `com.neuronspark.wuxianqin`
 3. App Store Connect → 新建 App:名称「無絃琴」(可加副标 Air Qin)、主语言简中、
    Bundle ID 选上一步、SKU 随意(如 wuxianqin)
 4. App 内购买项目 → 新建**非消耗型**:
@@ -31,14 +31,14 @@
 ### 第 0 屏 · developer.apple.com → Identifiers(先注册 Bundle ID)
 Certificates, Identifiers & Profiles → Identifiers → ➕ → App IDs → App
 - Description: `Wuxianqin`
-- Bundle ID: **Explicit** → `com.jeonshoeck.wuxianqin`
+- Bundle ID: **Explicit** → `com.neuronspark.wuxianqin`
 - Capabilities: 勾 **In-App Purchase**(其余不动)→ Register
 
 ### 第 1 屏 · App Store Connect → 我的 App → ➕ 新建 App
 - 平台: iOS
 - 名称: `無絃琴`(若被占用,备选 `無絃琴 · 凌空古琴`、`無絃琴 Air Qin`)
 - 主要语言: 简体中文
-- 套装 ID: 选 `com.jeonshoeck.wuxianqin`
+- 套装 ID: 选 `com.neuronspark.wuxianqin`
 - SKU: `wuxianqin`
 - 用户访问权限: 完全访问
 
