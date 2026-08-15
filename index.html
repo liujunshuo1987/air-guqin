@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.4';
+const APP_VER = 'v0.25.6';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -352,33 +352,42 @@ function setIntroState(s) {
       setIntroState(introState.slice(3) + (avg < 3 ? '·画面全黑!' : '·亮度' + (avg | 0)));
     } catch (e) { /* 忽略 */ }
   }
-  fetch('intro.mp4')
-    .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
-    .then(b => {
-      if (started || done) return;
-      vid.src = URL.createObjectURL(b);
-      return vid.play().then(() => {
+  function onPlaying(label) {
+    if (started || done) return;
+    setIntroState(label);
+    reveal([600, 1400, 2200, 3000, 3400, 3400]);
+    setTimeout(pixelProbe, 1200);
+    // 逐帧绘制到铺底画布(绕开 iOS 视频合成层),cover 取景
+    const bg = document.getElementById('introBg');
+    const bctx = bg.getContext('2d');
+    (function blit() {
+      if (ov.style.display === 'none') return;   // 入席后停止
+      if (vid.currentTime >= 3.0) vid.currentTime = 0;   // 只循环原始前 3 秒,裁去尾段
+      const W2 = bg.width = (bg.clientWidth || 1) * devicePixelRatio;
+      const H2 = bg.height = (bg.clientHeight || 1) * devicePixelRatio;
+      const vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
+      const sc = Math.max(W2 / vw, H2 / vh);
+      bctx.drawImage(vid, (W2 - vw * sc) / 2, (H2 - vh * sc) / 2, vw * sc, vh * sc);
+      requestAnimationFrame(blit);
+    })();
+  }
+  const introFail = (e) => { console.error('[开场]', e); fallback('拒:' + ((e && e.message) || (e && e.name) || e)); };
+  if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+    // 原生壳:本地资源处理器对 fetch 无 HTTP 语义(实测 status=0 被 r.ok 误杀),
+    // 而 <video> 直连 src 走原生 Range 管线——blob 路线是网页版 Safari 的专药,壳内不用
+    vid.src = 'intro.mp4';
+    vid.play().then(() => onPlaying('视频(原生)')).catch(introFail);
+  } else {
+    fetch('intro.mp4')
+      .then(r => { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
+      .then(b => {
         if (started || done) return;
+        vid.src = URL.createObjectURL(b);
         const ms = performance.now() - introT0;
-        setIntroState('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')');
-        reveal([600, 1400, 2200, 3000, 3400, 3400]);
-        setTimeout(pixelProbe, 1200);
-        // 逐帧绘制到铺底画布(绕开 iOS 视频合成层),cover 取景
-        const bg = document.getElementById('introBg');
-        const bctx = bg.getContext('2d');
-        (function blit() {
-          if (ov.style.display === 'none') return;   // 入席后停止
-          if (vid.currentTime >= 3.0) vid.currentTime = 0;   // 只循环原始前 3 秒,裁去尾段
-          const W2 = bg.width = (bg.clientWidth || 1) * devicePixelRatio;
-          const H2 = bg.height = (bg.clientHeight || 1) * devicePixelRatio;
-          const vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
-          const sc = Math.max(W2 / vw, H2 / vh);
-          bctx.drawImage(vid, (W2 - vw * sc) / 2, (H2 - vh * sc) / 2, vw * sc, vh * sc);
-          requestAnimationFrame(blit);
-        })();
-      });
-    })
-    .catch((e) => fallback('拒:' + ((e && e.name) || (e && e.message) || e)));
+        return vid.play().then(() => onPlaying('视频(blob·' + (ms < 500 ? '缓存' : '网络' + (ms | 0) + 'ms') + ')'));
+      })
+      .catch(introFail);
+  }
   setTimeout(() => fallback('超时·网络慢'), 3000);
 })();
 
