@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.6';
+const APP_VER = 'v0.25.7';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -502,6 +502,7 @@ let okHoldStart = 0, okHoldP = 0, okHoldPos = null;   // OK 手势(开录)保持
 let heartHoldStart = 0, heartHoldP = 0, heartPos = null;   // 双手比心(停录)保持进度
 let recCountEnd = 0, recGestureCoolT = -1e9;          // 3-2-1 倒计时终点 / 手势冷却
 const predBy = new Array(7).fill(null);   // 各弦预判来源 {key, vy}(下一帧校验轨迹,失效即撤)
+let lastHandSeenT = 0;             // 最近见到手的时刻:超时则上引导(勿静默死屏)
 let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
 let pressSmX = null;               // 按位平滑:速度自适应(定点稳、走手跟)
 let lastSnapK = -1;                // 徽位吸附滞回:吸进(0.014)易、吸出(0.022)难
@@ -956,6 +957,19 @@ async function fillCameraList() {
     camSel.style.display = devs.length > 1 ? '' : 'none';
     const saved = localStorage.getItem('qin.cam');
     if (saved && devs.some(d => d.deviceId === saved)) camSel.value = saved;
+    else {
+      // 无记忆选择时:优先标准前置,规避超广角/长焦被系统当默认
+      // (审核实测:iPad 落到 Front Ultra Wide,画面畸变昏暗且手不入framing)
+      const std = devs.find(d => /front|前置|user/i.test(d.label || '') && !/ultra|超广|tele|长焦/i.test(d.label || ''));
+      if (std) {
+        camSel.value = std.deviceId;
+        const cur = video.srcObject && video.srcObject.getVideoTracks()[0];
+        const curId = cur && cur.getSettings && cur.getSettings().deviceId;
+        if (curId && curId !== std.deviceId) {
+          try { await initCamera(std.deviceId); } catch (e) { /* 保持原镜头 */ }
+        }
+      }
+    }
   } catch (e) { /* 枚举失败不影响演奏 */ }
 }
 camSel.addEventListener('change', async () => {
@@ -2082,6 +2096,7 @@ function processHands(ts, meta) {
     perfM.camLag = perfM.camLag * 0.9 + Math.max(0, ts - meta.captureTime) * 0.1;
   lastDetectT = ts;
   readHands(ts);
+  if (curHands.length) lastHandSeenT = performance.now();
   trackRecGesture();
   if (mode === 'f') playFacade(); else playHorizontal();
   // 清理消失的指尖/手
@@ -2580,6 +2595,24 @@ function draw(now) {
       }
     }
   }
+  // 未见手引导:镜头开着却持续无手=用户(或审核员)不知所措的时刻,
+  // 双语提示替代静默——2.1 拒审实拍即此场景(暗红空画面+一行小字)
+  if (cameraOn && modelOn && !clean && lastHandSeenT && now - lastHandSeenT > 5000) {
+    const u = dpr(), cx = W / 2, cy = H * 0.5;
+    ctx2d.fillStyle = 'rgba(11,14,18,0.72)';
+    ctx2d.beginPath(); rrect(cx - 310 * u, cy - 64 * u, 620 * u, 128 * u, 10 * u); ctx2d.fill();
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = '#e8dcc0';
+    ctx2d.font = `${21 * u}px ${JZ_FONT}`;
+    ctx2d.fillText('镜头前未见到手', cx, cy - 30 * u);
+    ctx2d.fillStyle = '#b8ac8e';
+    ctx2d.font = `${14 * u}px ${JZ_FONT}`;
+    ctx2d.fillText('将设备立于身前一臂之遥,双手举到镜头前;画面过暗可换镜头或补光', cx, cy - 2 * u);
+    ctx2d.fillStyle = '#9a8f74';
+    ctx2d.font = `${13 * u}px serif`;
+    ctx2d.fillText('No hands detected — prop the device upright at arm\'s length', cx, cy + 26 * u);
+    ctx2d.fillText('and raise your hands in front of the camera', cx, cy + 46 * u);
+  }
   drawSeal();   // 录制落款:干净模式也保留(水印即落款)
   if (recOutro) drawRecOutro(now);   // 片尾品牌帧盖顶(录制流会收入此画面)
 
@@ -2909,6 +2942,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   document.getElementById('tips').style.display = 'block';
   requestAnimationFrame(loop);
   stat('open');
+  lastHandSeenT = performance.now();   // 入席即计时:5s 无手上引导
   updateDailyDot();
   if (!localStorage.getItem('qin.ftueDone')) ftueStart();
   else setTimeout(dailyGreet, 1500);   // 门口迎接:琴面先立稳,再递上今日一句
