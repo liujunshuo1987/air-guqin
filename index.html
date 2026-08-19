@@ -261,7 +261,7 @@
    ============================================================ */
 
 // 版本号:每次发布必升,开屏与 HUD 可见——"设备上跑的是哪版代码"必须可观测
-const APP_VER = 'v0.25.7';
+const APP_VER = 'v0.25.8';
 
 // ---------- 分层权益(收费脚手架) ----------
 // 白身(免费):完整乐器+第一章曲目+官印录制+每日一句;知音(买断):全曲库+雅号印
@@ -503,6 +503,8 @@ let heartHoldStart = 0, heartHoldP = 0, heartPos = null;   // 双手比心(停�
 let recCountEnd = 0, recGestureCoolT = -1e9;          // 3-2-1 倒计时终点 / 手势冷却
 const predBy = new Array(7).fill(null);   // 各弦预判来源 {key, vy}(下一帧校验轨迹,失效即撤)
 let lastHandSeenT = 0;             // 最近见到手的时刻:超时则上引导(勿静默死屏)
+let toastMsg = '', toastT = -1e9;  // 画布吐司:操作即回应(琴位曾被审核判"无响应")
+function showToast(t) { toastMsg = t; toastT = performance.now(); }
 let lastPressSi = -1;              // 按弦目标弦滞回:指尖悬于两弦之间时不逐帧摇摆
 let pressSmX = null;               // 按位平滑:速度自适应(定点稳、走手跟)
 let lastSnapK = -1;                // 徽位吸附滞回:吸进(0.014)易、吸出(0.022)难
@@ -539,6 +541,8 @@ const recHintChk = document.getElementById('recHintChk');
 function setQinLock(v) {
   qinLocked = v;
   lockBtn.textContent = v ? '🔒 琴位' : '🔓 琴位';
+  showToast(v ? '琴位已锁定:双手平举不会再重新定琴'
+              : '琴位已解锁:双手平举静止片刻,可重新定琴');
   calibStart = 0; calibProgress = 0;
 }
 lockBtn.addEventListener('click', () => setQinLock(!qinLocked));
@@ -2594,6 +2598,18 @@ function draw(now) {
         console.error('[debug-panel]', e);
       }
     }
+  }
+  if (!clean && performance.now() - toastT < 2600) {
+    const u = dpr(), cx = W / 2, ty = H * 0.13;
+    const a = Math.min(1, (2600 - (performance.now() - toastT)) / 400);
+    ctx2d.globalAlpha = a;
+    ctx2d.fillStyle = 'rgba(11,14,18,0.8)';
+    ctx2d.beginPath(); rrect(cx - 250 * u, ty - 22 * u, 500 * u, 40 * u, 8 * u); ctx2d.fill();
+    ctx2d.textAlign = 'center';
+    ctx2d.fillStyle = '#e8dcc0';
+    ctx2d.font = `${15 * u}px ${JZ_FONT}`;
+    ctx2d.fillText(toastMsg, cx, ty + 4 * u);
+    ctx2d.globalAlpha = 1;
   }
   // 未见手引导:镜头开着却持续无手=用户(或审核员)不知所措的时刻,
   // 双语提示替代静默——2.1 拒审实拍即此场景(暗红空画面+一行小字)
