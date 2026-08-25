@@ -173,9 +173,9 @@
     <div class="zy-item"><b>三卷全启</b><span>移植 · 古调 · 大曲,十一谱全篇尽弹,后续新谱入库同享</span></div>
     <div class="zy-item"><b>雅号之印</b><span>刻你的一至四字雅号,朱砂落款于每一段录制——你的琴,你的印</span></div>
     <div class="zy-item"><b>金玉之声</b><span>三境音色:幽谷 · 古刹 · 雪夜——空山、梵刹、炉边雪,一键换境</span></div>
-    <div style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · ¥48 · 永久</div>
+    <div id="zyPrice" style="margin:26px 0 8px; font-size:16px; color:#e8dcc0">一次买断 · 永久</div>
     <div id="zyStatus" style="font-size:12px; color:#9a8f74; margin-bottom:24px; line-height:1.8"></div>
-    <button id="zyBuy" style="display:none">成为知音 · ¥48</button>
+    <button id="zyBuy" style="display:none">成为知音</button>
     <button id="zyRestore" style="display:none; font-size:12px">恢复购买</button>
     <button id="zySeal" style="display:none">刻我的雅号印</button>
     <button id="zyClose">回琴</button>
@@ -1406,6 +1406,7 @@ const IAP_PRODUCT = 'com.jeonshoeck.wuxianqin.zhiyin';
 const isNativeApp = () =>
   !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 let iapReady = false;
+let iapPrice = null;
 function iapGrant() {
   localStorage.setItem('qin.tier', 'zhiyin');
   refreshScoreOpts();
@@ -1421,8 +1422,11 @@ function iapInit() {
   store.when().approved(tr => tr.finish());
   // 商店拉到真实本地化价格后刷新按钮(各地区货币各显其价,标价永不失实)
   store.when().productUpdated(p => {
-    if (p.id === IAP_PRODUCT && p.pricing && p.pricing.price)
-      document.getElementById('zyBuy').textContent = '成为知音 · ' + p.pricing.price;
+    if (p.id !== IAP_PRODUCT || !p.pricing || !p.pricing.price) return;
+    // 各区货币各显其价:174 个上架地区由 App Store 换算,页面不留任何写死的价
+    iapPrice = p.pricing.price;
+    document.getElementById('zyBuy').textContent = '成为知音 · ' + iapPrice;
+    document.getElementById('zyPrice').textContent = '一次买断 · ' + iapPrice + ' · 永久';
   });
   store.when().finished(tr => { if (tr.products.some(p => p.id === IAP_PRODUCT)) iapGrant(); });
   store.initialize([Platform.APPLE_APPSTORE]);
@@ -1432,11 +1436,12 @@ function zyOpen() {
   stat('zy_view');
   iapInit();
   const native = isNativeApp();
+  if (iapPrice) document.getElementById('zyPrice').textContent = '一次买断 · ' + iapPrice + ' · 永久';
   document.getElementById('zyStatus').innerHTML = ENT.zhiyin
     ? '✓ 你已是知音,谢谢你的相知'
     : native
       ? '一次买断,权益随你的 Apple ID<br>换机不失,恢复购买即回'
-      : '解锁在 App Store 版 · 即将上线<br>网页版以试奏相赠,先弹为敬';
+      : '解锁在 App Store 版<br>网页版以试奏相赠,先弹为敬';
   document.getElementById('zySeal').style.display = ENT.zhiyin ? '' : 'none';
   document.getElementById('zyBuy').style.display = native && !ENT.zhiyin ? '' : 'none';
   document.getElementById('zyRestore').style.display = native && !ENT.zhiyin ? '' : 'none';
